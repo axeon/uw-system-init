@@ -30,19 +30,9 @@ LOG_FILE="${LOG_DIR}/uniweb-init.log"
 mkdir -p "$LOG_DIR"
 
 # ============================================================
-#  日志系统：全局双写（终端 + 文件）
-#  终端保留颜色，日志文件去掉颜色并加时间戳
+#  日志系统
+#  终端输出带颜色，日志文件无颜色 + 时间戳
 # ============================================================
-
-_redir_log() {
-    local line
-    while IFS= read -r line || [ -n "$line" ]; do
-        echo "$line"
-        echo "$(date '+%Y-%m-%d %H:%M:%S') $line" | sed 's/\x1b\[[0-9;]*m//g' >> "$LOG_FILE"
-    done
-}
-
-exec > >(_redir_log) 2>&1
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -51,11 +41,43 @@ BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
-log_info()   { echo -e "${GREEN}[INFO]${NC} $*"; }
-log_warn()   { echo -e "${YELLOW}[WARN]${NC} $*"; }
-log_error()  { echo -e "${RED}[ERROR]${NC} $*"; }
-log_step()   { echo -e "${BLUE}[STEP]${NC} $*"; }
-log_ok()     { echo -e "${CYAN}[OK]${NC} $*"; }
+_log() {
+    local color="$1" tag="$2"; shift 2
+    local msg="$*"
+    local ts
+    ts=$(date '+%Y-%m-%d %H:%M:%S')
+    echo -e "${color}[${tag}]${NC} ${msg}"
+    echo "${ts} [${tag}] ${msg}" >> "$LOG_FILE"
+}
+
+log_info()   { _log "$GREEN"  "INFO"  "$@"; }
+log_warn()   { _log "$YELLOW" "WARN"  "$@"; }
+log_error()  { _log "$RED"    "ERROR" "$@"; }
+log_step()   { _log "$BLUE"   "STEP"  "$@"; }
+log_ok()     { _log "$CYAN"   "OK"    "$@"; }
+
+run_log() {
+    local desc="$1"; shift
+    log_info "${desc}..."
+    local rc
+    "$@" 2>&1 | tee -a "$LOG_FILE"
+    rc=${PIPESTATUS[0]}
+    if [ $rc -ne 0 ]; then
+        log_warn "${desc} 失败 (退出码: $rc)"
+    fi
+    return $rc
+}
+
+run_silent() {
+    local desc="$1"; shift
+    log_info "${desc}..."
+    local rc=0
+    "$@" >> "$LOG_FILE" 2>&1 || rc=$?
+    if [ $rc -ne 0 ]; then
+        log_warn "${desc} 失败 (退出码: $rc)"
+    fi
+    return $rc
+}
 
 generate_password() {
     openssl rand -base64 50 | tr -dc A-Z-a-z-0-9 | head -c${1:-32}
@@ -136,8 +158,8 @@ run_checklist() {
 
 install_system_deps() {
     log_step "安装系统依赖..."
-    apt-get update -y
-    apt-get install -y ca-certificates curl gnupg apache2-utils whiptail
+    run_log "apt-get update" apt-get update -y
+    run_log "apt-get install" apt-get install -y ca-certificates curl gnupg apache2-utils whiptail
     log_ok "系统依赖安装完成"
 }
 
@@ -286,13 +308,13 @@ install_docker() {
     log_step "安装 Docker..."
 
     install -m 0755 -d /etc/apt/keyrings
-    curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
+    run_log "下载 Docker GPG key" curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
     chmod a+r /etc/apt/keyrings/docker.asc
 
     echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian \
 $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
-    apt-get update -y
-    apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+    run_log "apt-get update (docker)" apt-get update -y
+    run_log "apt-get install docker" apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 
     cat > /etc/docker/daemon.json << EOF
 {
@@ -312,21 +334,21 @@ state = "/home/docker/containerd/state"
 EOF
 
     mkdir -p /home/docker/lib /home/docker/containerd /home/docker/containerd/state
-    systemctl daemon-reload
-    systemctl restart containerd
-    systemctl restart docker
+    run_log "systemctl daemon-reload" systemctl daemon-reload
+    run_log "重启 containerd" systemctl restart containerd
+    run_log "重启 docker" systemctl restart docker
     log_ok "Docker 安装完成"
 }
 
 install_registry() {
     source_config
     log_step "启动 Registry 镜像仓库..."
-    bash "${SCRIPT_DIR}/startRegistry5000.sh"
+    run_log "startRegistry5000" bash "${SCRIPT_DIR}/startRegistry5000.sh"
 
     log_info "设置 Registry 密码..."
     mkdir -p /home/registry/auth
-    htpasswd -Bbc /home/registry/auth/htpasswd "$REGISTRY_USERNAME" "$REGISTRY_PASSWORD"
-    docker login --username="$REGISTRY_USERNAME" --password="$REGISTRY_PASSWORD" "$REGISTRY_SERVER"
+    run_log "htpasswd" htpasswd -Bbc /home/registry/auth/htpasswd "$REGISTRY_USERNAME" "$REGISTRY_PASSWORD"
+    run_log "docker login" docker login --username="$REGISTRY_USERNAME" --password="$REGISTRY_PASSWORD" "$REGISTRY_SERVER"
     log_ok "Registry 安装完成"
 }
 
@@ -391,8 +413,7 @@ pull_selected_images() {
     if [ ${#images[@]} -gt 0 ]; then
         log_step "拉取镜像 (${#images[@]} 个)..."
         for img in "${images[@]}"; do
-            log_info "拉取 ${img}..."
-            docker pull "$img" || log_warn "拉取失败: ${img}，将在启动时重试"
+            run_silent "拉取 ${img}" docker pull "$img" || log_warn "拉取失败: ${img}，将在启动时重试"
         done
         log_ok "镜像拉取完成"
     fi
@@ -405,7 +426,7 @@ pull_selected_images() {
 setup_mysql() {
     source_config
     log_step "启动 MySQL..."
-    bash "${SCRIPT_DIR}/startMydbMysql3308.sh"
+    run_log "启动 MySQL" bash "${SCRIPT_DIR}/startMydbMysql3308.sh"
     log_info "等待 MySQL 就绪..."
     local retries=0
     while [ $retries -lt 30 ]; do
@@ -423,13 +444,13 @@ setup_mysql() {
 
 setup_redis() {
     log_step "启动 Redis..."
-    bash "${SCRIPT_DIR}/startRedis6380.sh"
+    run_log "启动 Redis" bash "${SCRIPT_DIR}/startRedis6380.sh"
     log_ok "Redis 已启动"
 }
 
 setup_rabbitmq() {
     log_step "启动 RabbitMQ..."
-    bash "${SCRIPT_DIR}/startRabbitMQ5672.sh"
+    run_log "启动 RabbitMQ" bash "${SCRIPT_DIR}/startRabbitMQ5672.sh"
     log_ok "RabbitMQ 已启动"
 }
 
@@ -442,7 +463,7 @@ vm.max_map_count=262144
 fs.file-max=6815744
 EOF
     }
-    sysctl -p 2>/dev/null | tail -5
+    sysctl -p 2>/dev/null | tail -5 >> "$LOG_FILE"
 
     ulimit -n 65535
     ulimit -u 32768
@@ -462,7 +483,7 @@ EOF
     log_ok "ES 环境参数已设置"
 
     log_step "启动 Elasticsearch..."
-    bash "${SCRIPT_DIR}/startES9200.sh"
+    run_log "启动 ES" bash "${SCRIPT_DIR}/startES9200.sh"
     log_info "等待 ES 就绪..."
     local es_retries=0
     while [ $es_retries -lt 30 ]; do
@@ -537,19 +558,19 @@ EOF
     log_ok "ES 配置初始化完成"
 
     log_step "启动 Kibana..."
-    bash "${SCRIPT_DIR}/startKibana5601.sh"
+    run_log "启动 Kibana" bash "${SCRIPT_DIR}/startKibana5601.sh"
     log_ok "Kibana 已启动"
 }
 
 setup_nacos() {
     log_step "启动 Nacos..."
-    bash "${SCRIPT_DIR}/startNacos8848.sh"
+    run_log "启动 Nacos" bash "${SCRIPT_DIR}/startNacos8848.sh"
     log_ok "Nacos 已启动"
 }
 
 setup_minio() {
     log_step "启动 MinIO..."
-    bash "${SCRIPT_DIR}/startMinio9000.sh"
+    run_log "启动 MinIO" bash "${SCRIPT_DIR}/startMinio9000.sh"
     log_ok "MinIO 已启动"
 }
 
@@ -604,7 +625,7 @@ import_selected_databases() {
         done
 
         log_step "导入数据库 (${#unique_sqls[@]} 个)..."
-        bash "${SCRIPT_DIR}/init/initMysqlData.sh" "${unique_sqls[@]}"
+        run_log "导入数据库" bash "${SCRIPT_DIR}/init/initMysqlData.sh" "${unique_sqls[@]}"
         log_ok "数据库导入完成"
     fi
 }
@@ -620,7 +641,7 @@ start_uw_image() {
     local name="${image%%:*}"
     local version="${image#*:}"
     log_step "启动 ${name}..."
-    bash "${SCRIPT_DIR}/startApp.sh" "$name" "$version" "$port" "$mem_limit"
+    run_log "启动 ${name}" bash "${SCRIPT_DIR}/startApp.sh" "$name" "$version" "$port" "$mem_limit"
     log_ok "${name} 已启动 (${port})"
 }
 
@@ -630,7 +651,7 @@ start_uw_ui_image() {
     local name="${image%%:*}"
     local version="${image#*:}"
     log_step "启动 ${name}..."
-    bash "${SCRIPT_DIR}/startUI.sh" "$name" "$version" "$port"
+    run_log "启动 ${name}" bash "${SCRIPT_DIR}/startUI.sh" "$name" "$version" "$port"
     log_ok "${name} 已启动 (${port})"
 }
 
@@ -640,19 +661,19 @@ start_uw_ui_image() {
 
 setup_gitea() {
     log_step "启动 Gitea..."
-    bash "${SCRIPT_DIR}/startGitea.sh"
+    run_log "启动 Gitea" bash "${SCRIPT_DIR}/startGitea.sh"
     log_ok "Gitea 已启动"
 }
 
 setup_nexus3() {
     log_step "启动 Nexus3..."
-    bash "${SCRIPT_DIR}/startNexus3.sh"
+    run_log "启动 Nexus3" bash "${SCRIPT_DIR}/startNexus3.sh"
     log_ok "Nexus3 已启动"
 }
 
 setup_mihomo() {
     log_step "启动 Mihomo..."
-    bash "${SCRIPT_DIR}/startMihomo.sh"
+    run_log "启动 Mihomo" bash "${SCRIPT_DIR}/startMihomo.sh"
     log_ok "Mihomo 已启动"
 }
 
@@ -668,7 +689,7 @@ init_ops() {
         log_warn "ops-agent 安装脚本获取失败，重试 ($ops_retries/10)..."
         sleep 10
     done
-    if [ $ops_retries -ge 10 ]; then
+    if [ $ops_retries -ge 10 ] || [ -z "$installer" ]; then
         log_error "ops-agent 安装脚本获取失败，请手动安装"
         exit 1
     fi
@@ -809,9 +830,9 @@ EOF
 
     systemctl stop uniweb-slave-server.socket 2>/dev/null || true
     systemctl stop uniweb-slave-server.service 2>/dev/null || true
-    systemctl daemon-reload
-    systemctl enable uniweb-slave-server.socket
-    systemctl start uniweb-slave-server.socket
+    run_log "systemctl daemon-reload" systemctl daemon-reload
+    run_log "enable slave-server.socket" systemctl enable uniweb-slave-server.socket
+    run_log "start slave-server.socket" systemctl start uniweb-slave-server.socket
 
     local master_ip
     master_ip=$(ip addr show | awk '/inet / && /10\.|192\.168\./ {print $2}' | head -1 | cut -d/ -f1)
