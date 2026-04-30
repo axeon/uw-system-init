@@ -21,6 +21,12 @@ if [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 
+if [ ! -f /etc/debian_version ]; then
+    echo "[ERROR] 本工具仅支持 Debian/Ubuntu 系列 Linux 发行版。"
+    echo "       当前系统不被支持，请使用 Debian、Ubuntu、Linux Mint 等发行版。"
+    exit 1
+fi
+
 echo "[INFO] 安装基础依赖..."
 apt-get update -y
 apt-get install -y git curl bash
