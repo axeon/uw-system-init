@@ -415,7 +415,9 @@ install_registry() {
     log_info "等待 Registry 就绪..."
     local reg_retries=0
     while [ $reg_retries -lt 30 ]; do
-        if curl -sf "http://127.0.0.1:5000/v2/" &>/dev/null; then
+        local http_code
+        http_code=$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:5000/v2/" 2>/dev/null)
+        if [ "$http_code" -ge 200 ] && [ "$http_code" -lt 500 ]; then
             break
         fi
         reg_retries=$((reg_retries + 1))
