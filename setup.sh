@@ -994,7 +994,8 @@ if [ -f "$CONFIG_FILE" ]; then
     read -e -p "是否使用已有配置? [Y/n]: " USE_EXISTING
     case "$USE_EXISTING" in
         n|N) mkdir -p "${UNIWEB_DIR}"; generate_config ;;
-        *)   log_ok "使用已有配置文件" ;;
+        y|Y|"") log_ok "使用已有配置文件" ;;
+        *)   log_warn "无效输入，重新生成配置"; mkdir -p "${UNIWEB_DIR}"; generate_config ;;
     esac
 else
     mkdir -p "${UNIWEB_DIR}"
@@ -1004,6 +1005,7 @@ show_config
 read -e -p "是否需要编辑配置文件? [y/N]: " EDIT_IT
 case "$EDIT_IT" in
     y|Y) ${EDITOR:-vi} "$CONFIG_FILE" ;;
+    *) ;;
 esac
 
 # --- 阶段 3: 配置应用 (替换 #{KEY} 占位符) ---
@@ -1062,7 +1064,9 @@ echo ""
 
 read -e -p "确认开始安装? [Y/n]: " CONFIRM
 case "$CONFIRM" in
-    [Nn]) log_info "取消安装"; exit 0 ;;
+    n|N) log_info "取消安装"; exit 0 ;;
+    y|Y|"") ;;
+    *)   log_warn "无效输入，请重新确认"; exit 0 ;;
 esac
 
 # --- 阶段 5: 按需分发文件 (仅复制选中组件对应的 initHome/initData) ---
