@@ -19,6 +19,10 @@
 #  全局变量
 # ============================================================
 
+export LANG="zh_CN.UTF-8"
+export LC_ALL="zh_CN.UTF-8"
+export TERM="${TERM:-xterm-256color}"
+
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 UNIWEB_DIR="/root/uniweb"
 SCRIPT_DIR="${UNIWEB_DIR}/script"
@@ -170,6 +174,8 @@ _show_selection() {
 
 install_system_deps() {
     log_step "安装系统依赖..."
+    grep -q 'zh_CN.UTF-8 UTF-8' /etc/locale.gen 2>/dev/null || echo "zh_CN.UTF-8 UTF-8" >> /etc/locale.gen
+    locale-gen zh_CN.UTF-8 2>/dev/null || true
     run_log "apt-get update" apt-get update -y
     run_log "apt-get install" apt-get install -y ca-certificates curl gnupg apache2-utils whiptail
     log_ok "系统依赖安装完成"

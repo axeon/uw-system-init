@@ -29,7 +29,8 @@ fi
 echo "[INFO] 安装基础依赖..."
 apt-get update -y
 apt-get install -y git curl bash whiptail ncurses-term locales ca-certificates gnupg apache2-utils
-locale-gen zh_CN.UTF-8 2>/dev/null || true
+grep -q 'zh_CN.UTF-8 UTF-8' /etc/locale.gen 2>/dev/null || echo "zh_CN.UTF-8 UTF-8" >> /etc/locale.gen
+locale-gen zh_CN.UTF-8
 
 export TERM="${TERM:-xterm-256color}"
 export LANG=zh_CN.UTF-8
