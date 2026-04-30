@@ -491,11 +491,6 @@ _pull_image_to_local() {
     local upstream_ref="${UNIWEB_REGISTRY_SERVER}/${image}"
     local public_ref="${PUBLIC_REGISTRY_SERVER:+${PUBLIC_REGISTRY_SERVER}/}${image}"
 
-    if docker image inspect "$local_ref" &>/dev/null; then
-        log_ok "镜像已存在: ${local_ref}"
-        return 0
-    fi
-
     log_info "拉取 ${image}..."
 
     if _docker_pull "上游仓库 " "$upstream_ref" "${UNIWEB_REGISTRY_SERVER}"; then
