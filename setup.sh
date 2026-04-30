@@ -108,7 +108,7 @@ run_checklist() {
     local result
     result=$(whiptail --title "$title" --checklist \
         "用 方向键 移动，空格 选择/取消，回车 确认" \
-        --separate-output \
+        --separate-output --keep-window \
         $(( ${#items[@]} + 7 )) 55 ${#items[@]} \
         "${args[@]}" 3>&1 1>&2 2>&3)
     SELECTED=()
@@ -124,10 +124,7 @@ run_checklist() {
 install_system_deps() {
     log_step "安装系统依赖..."
     apt-get update -y
-    apt-get install -y ca-certificates curl gnupg apache2-utils whiptail locales
-    locale-gen zh_CN.UTF-8 2>/dev/null || true
-    export LANG=zh_CN.UTF-8
-    export LC_ALL=zh_CN.UTF-8
+    apt-get install -y ca-certificates curl gnupg apache2-utils whiptail
     log_ok "系统依赖安装完成"
 }
 

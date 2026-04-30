@@ -29,9 +29,15 @@ fi
 
 echo "[INFO] 安装基础依赖..."
 apt-get update -y
-apt-get install -y git curl bash
+apt-get install -y git curl bash whiptail ncurses-term locales
+locale-gen zh_CN.UTF-8 2>/dev/null || true
+
+export TERM="${TERM:-xterm-256color}"
+export LANG=zh_CN.UTF-8
+export LC_ALL=zh_CN.UTF-8
 
 INSTALL_DIR="/root/.uw-system-init-$(date +%y%m%d%H%M%S)"
+trap 'rm -fr "$INSTALL_DIR" 2>/dev/null' EXIT
 
 REPO_URL="https://github.com/axeon/uw-system-init.git"
 echo "[INFO] 使用 GitHub 源: $REPO_URL"
@@ -45,11 +51,4 @@ find "$INSTALL_DIR" -type f -name "*.sh" -exec chmod +x {} \;
 
 echo "[INFO] 启动安装向导..."
 cd "$INSTALL_DIR"
-bash setup.sh < /dev/tty
-
-echo ""
-read -p "安装完成，是否删除临时克隆目录 $INSTALL_DIR? [Y/n]: " CLEANUP < /dev/tty
-case "$CLEANUP" in
-    n|N) echo "[INFO] 临时目录保留: $INSTALL_DIR" ;;
-    *)   rm -fr "$INSTALL_DIR"; echo "[INFO] 临时目录已清理" ;;
-esac
+bash setup.sh </dev/tty >/dev/tty 2>&1
