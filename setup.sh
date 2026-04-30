@@ -430,7 +430,8 @@ install_registry() {
         exit 1
     fi
 
-    run_log "docker login" echo "$REGISTRY_PASSWORD" | docker login --username="$REGISTRY_USERNAME" --password-stdin "$REGISTRY_SERVER" || {
+    log_info "docker login ${REGISTRY_SERVER}..."
+    echo "$REGISTRY_PASSWORD" | docker login --username="$REGISTRY_USERNAME" --password-stdin "$REGISTRY_SERVER" 2>&1 | tee -a "$LOG_FILE" || {
         log_error "docker login 失败"
         exit 1
     }
@@ -455,7 +456,8 @@ _docker_login() {
         log_warn "用户名或密码为空，跳过登录"
         return 1
     fi
-    run_log "docker login ${server}" echo "$reg_pass" | docker login --username="$reg_user" --password-stdin "$server" || {
+    log_info "docker login ${server}..."
+    echo "$reg_pass" | docker login --username="$reg_user" --password-stdin "$server" 2>&1 | tee -a "$LOG_FILE" || {
         log_warn "仓库 ${server} 登录失败"
         return 1
     }
