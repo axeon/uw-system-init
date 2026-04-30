@@ -168,7 +168,7 @@ install_system_deps() {
 # ============================================================
 
 generate_config() {
-    read -p "请输入系统名称（如: my-company）: " SYSTEM_NAME
+    read -e -p "请输入系统名称（如: my-company）: " SYSTEM_NAME
     SYSTEM_NAME="${SYSTEM_NAME:-uniweb}"
     log_info "系统名称: $SYSTEM_NAME"
 
@@ -991,7 +991,7 @@ install_system_deps
 log_step "===== 阶段 2: 配置生成 ====="
 if [ -f "$CONFIG_FILE" ]; then
     log_info "检测到已有配置文件: $CONFIG_FILE"
-    read -p "是否使用已有配置? [Y/n]: " USE_EXISTING
+    read -e -p "是否使用已有配置? [Y/n]: " USE_EXISTING
     case "$USE_EXISTING" in
         n|N) mkdir -p "${UNIWEB_DIR}"; generate_config ;;
         *)   log_ok "使用已有配置文件" ;;
@@ -1001,7 +1001,7 @@ else
     generate_config
 fi
 show_config
-read -p "是否需要编辑配置文件? [y/N]: " EDIT_IT
+read -e -p "是否需要编辑配置文件? [y/N]: " EDIT_IT
 case "$EDIT_IT" in
     y|Y) ${EDITOR:-vi} "$CONFIG_FILE" ;;
 esac
@@ -1060,7 +1060,7 @@ for i in "${DEV_SELECTED[@]}"; do echo "    [*] ${DEV_ITEMS[$i]}"; done
 [ ${#DEV_SELECTED[@]} -eq 0 ] && echo "    (无)"
 echo ""
 
-read -p "确认开始安装? [Y/n]: " CONFIRM
+read -e -p "确认开始安装? [Y/n]: " CONFIRM
 case "$CONFIRM" in
     [Nn]) log_info "取消安装"; exit 0 ;;
 esac
