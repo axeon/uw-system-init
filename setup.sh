@@ -402,15 +402,16 @@ EOF
 
 install_registry() {
     source_config
+
+    log_info "设置 Registry 密码..."
+    mkdir -p /home/registry/auth /home/registry/data
+    run_log "htpasswd" htpasswd -Bbc /home/registry/auth/htpasswd "$REGISTRY_USERNAME" "$REGISTRY_PASSWORD"
+
     log_step "启动 Registry 镜像仓库..."
     run_log "startRegistry5000" bash "${SCRIPT_DIR}/startRegistry5000.sh" || {
         log_error "Registry 启动失败"
         exit 1
     }
-
-    log_info "设置 Registry 密码..."
-    mkdir -p /home/registry/auth
-    run_log "htpasswd" htpasswd -Bbc /home/registry/auth/htpasswd "$REGISTRY_USERNAME" "$REGISTRY_PASSWORD"
 
     log_info "等待 Registry 就绪..."
     local reg_retries=0
