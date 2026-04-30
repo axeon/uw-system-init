@@ -411,7 +411,23 @@ install_registry() {
     log_info "设置 Registry 密码..."
     mkdir -p /home/registry/auth
     run_log "htpasswd" htpasswd -Bbc /home/registry/auth/htpasswd "$REGISTRY_USERNAME" "$REGISTRY_PASSWORD"
-    run_log "docker login" docker login --username="$REGISTRY_USERNAME" --password="$REGISTRY_PASSWORD" "$REGISTRY_SERVER" || {
+
+    log_info "等待 Registry 就绪..."
+    local reg_retries=0
+    while [ $reg_retries -lt 30 ]; do
+        if curl -sf "http://127.0.0.1:5000/v2/" &>/dev/null; then
+            break
+        fi
+        reg_retries=$((reg_retries + 1))
+        echo "  等待 Registry... ($reg_retries/30)"
+        sleep 2
+    done
+    if [ $reg_retries -ge 30 ]; then
+        log_error "Registry 等待超时"
+        exit 1
+    fi
+
+    run_log "docker login" echo "$REGISTRY_PASSWORD" | docker login --username="$REGISTRY_USERNAME" --password-stdin "$REGISTRY_SERVER" || {
         log_error "docker login 失败"
         exit 1
     }
@@ -436,7 +452,7 @@ _docker_login() {
         log_warn "用户名或密码为空，跳过登录"
         return 1
     fi
-    run_log "docker login ${server}" docker login --username="$reg_user" --password="$reg_pass" "$server" || {
+    run_log "docker login ${server}" echo "$reg_pass" | docker login --username="$reg_user" --password-stdin "$server" || {
         log_warn "仓库 ${server} 登录失败"
         return 1
     }
@@ -565,7 +581,7 @@ setup_mysql() {
     log_info "等待 MySQL 就绪..."
     local retries=0
     while [ $retries -lt 30 ]; do
-        if docker exec -i uw-mydb-mysql-3308 mysqladmin ping -h 127.0.0.1 -P 3308 -u root -p"${MYSQL_ROOT_PASSWORD}" --silent 2>/dev/null; then
+        if MYSQL_PWD="${MYSQL_ROOT_PASSWORD}" docker exec -i -e MYSQL_PWD uw-mydb-mysql-3308 mysqladmin ping -h 127.0.0.1 -P 3308 -u root --silent 2>/dev/null; then
             log_ok "MySQL 已启动"
             return
         fi
@@ -953,7 +969,7 @@ DAEMON_EOF
 fi
 
 log_step "登录镜像仓库..."
-docker login --username="${REGISTRY_USERNAME}" --password="${REGISTRY_PASSWORD}" "${REGISTRY_SERVER}" || {
+echo "${REGISTRY_PASSWORD}" | docker login --username="${REGISTRY_USERNAME}" --password-stdin "${REGISTRY_SERVER}" || {
     log_error "docker login 失败"
     exit 1
 }

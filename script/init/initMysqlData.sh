@@ -31,9 +31,9 @@ MYSQL_CONTAINER="uw-mydb-mysql-3308"
 # ============================================================
 
 _mysql_exec() {
-    docker exec -i "$MYSQL_CONTAINER" mysql \
+    MYSQL_PWD="${MYSQL_ROOT_PASSWORD}" docker exec -i -e MYSQL_PWD "$MYSQL_CONTAINER" mysql \
         -h "${MYSQL_HOST}" -P "${MYSQL_PORT}" \
-        -u "${MYSQL_ROOT_USERNAME}" -p"${MYSQL_ROOT_PASSWORD}" \
+        -u "${MYSQL_ROOT_USERNAME}" \
         "$@" 2>/dev/null
 }
 
