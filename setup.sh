@@ -145,14 +145,16 @@ generate_config() {
         log_info "本机IP是: $HOST_IP"
     else
         echo "本机有多个IP，请选择一个IP作为配置文件的主机配置:"
+        PS3="请输入编号 [1-$(echo "$HOST_IPS" | wc -w)]: "
         select HOST_IP in $HOST_IPS; do
             if [ -n "$HOST_IP" ]; then
                 log_info "您选择的IP地址是: $HOST_IP"
                 break
             else
-                echo "无效的选择，请重新选择。"
+                echo "无效的选择，请输入对应的数字编号。"
             fi
         done
+        unset PS3
     fi
 
     cat > "$CONFIG_FILE" << EOF
