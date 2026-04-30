@@ -144,7 +144,7 @@ run_checklist() {
     result=$(whiptail --title "$title" --checklist \
         "用 方向键 移动，空格 选择/取消，回车 确认" \
         --separate-output \
-        $(( ${#items[@]} + 7 )) 55 ${#items[@]} \
+        $(( ${#items[@]} + 7 )) 80 ${#items[@]} \
         "${args[@]}" 3>&1 1>&2 2>&3)
     SELECTED=()
     while IFS= read -r line; do
