@@ -11,6 +11,6 @@ CID=$(docker run -d \
 -v /home/nexus3/data:/nexus-data \
 ${DOCKER_COMMON_OPTS} \
 --name=nexus3 \
-"${IMAGE_NEXUS3}")
+"${REGISTRY_SERVER}/${IMAGE_NEXUS3}")
 
 docker_run_check "$CID" "nexus3"

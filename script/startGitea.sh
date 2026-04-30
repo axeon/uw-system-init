@@ -12,6 +12,6 @@ CID=$(docker run -d \
 -v /home/gitea:/data \
 ${DOCKER_COMMON_OPTS} \
 --name=gitea \
-"${IMAGE_GITEA}")
+"${REGISTRY_SERVER}/${IMAGE_GITEA}")
 
 docker_run_check "$CID" "gitea"

@@ -13,6 +13,6 @@ CID=$(docker run -d \
 -v /home/minio9000/data:/data \
 ${DOCKER_COMMON_OPTS} \
 --name=minio9000 \
-"${IMAGE_MINIO}" server --address ":9000" --console-address ":9001")
+"${REGISTRY_SERVER}/${IMAGE_MINIO}" server --address ":9000" --console-address ":9001")
 
 docker_run_check "$CID" "minio9000"

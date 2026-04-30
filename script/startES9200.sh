@@ -22,6 +22,6 @@ CID=$(docker run -d \
 -v /home/es9200/plugins:/usr/share/elasticsearch/plugins \
 ${DOCKER_COMMON_OPTS} \
 --name=es9200 \
-"${IMAGE_ELASTICSEARCH}")
+"${REGISTRY_SERVER}/${IMAGE_ELASTICSEARCH}")
 
 docker_run_check "$CID" "es9200"

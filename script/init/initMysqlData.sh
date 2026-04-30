@@ -64,7 +64,7 @@ if [ $# -eq 0 ]; then
     import_sql initNotifyCenter.sql
     import_sql initCodeCenter.sql
     import_sql initSaasBase.sql
-    import_sql initSaasFinanceApp.sql
+    import_sql initSaasFinance.sql
 else
     import_sql initUser.sql
     import_sql initNacos.sql

@@ -12,6 +12,6 @@ CID=$(docker run -d \
 -v /home/redis6380/data:/data \
 ${DOCKER_COMMON_OPTS} \
 --name=redis6380 \
-"${IMAGE_REDIS}" redis-server /usr/local/etc/redis/redis.conf)
+"${REGISTRY_SERVER}/${IMAGE_REDIS}" redis-server /usr/local/etc/redis/redis.conf)
 
 docker_run_check "$CID" "redis6380"

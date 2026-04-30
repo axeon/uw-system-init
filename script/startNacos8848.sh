@@ -14,6 +14,6 @@ CID=$(docker run -d \
 ${DOCKER_COMMON_OPTS} \
 --cpus=2 \
 --name=nacos8848 \
-"${IMAGE_NACOS}")
+"${REGISTRY_SERVER}/${IMAGE_NACOS}")
 
 docker_run_check "$CID" "nacos8848"

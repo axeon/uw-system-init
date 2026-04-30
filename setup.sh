@@ -404,64 +404,93 @@ install_registry() {
 #  镜像拉取（按需）
 # ============================================================
 
+pull_image_to_local() {
+    local image="$1"
+    local local_ref="${REGISTRY_SERVER}/${image}"
+    local upstream_ref="${UNIWEB_REGISTRY_SERVER}/${image}"
+    local public_ref="${PUBLIC_REGISTRY_SERVER:+${PUBLIC_REGISTRY_SERVER}/}${image}"
+
+    if docker image inspect "$local_ref" &>/dev/null; then
+        log_ok "镜像已存在: ${local_ref}"
+        return 0
+    fi
+
+    log_info "拉取 ${image}..."
+    if run_silent "从上游仓库拉取 ${upstream_ref}" docker pull "$upstream_ref"; then
+        run_silent "标记镜像 ${upstream_ref} -> ${local_ref}" docker tag "$upstream_ref" "$local_ref"
+        run_silent "推送到本地仓库 ${local_ref}" docker push "$local_ref"
+        return 0
+    fi
+
+    log_info "上游仓库拉取失败，尝试公共仓库..."
+    if run_silent "从公共仓库拉取 ${public_ref}" docker pull "$public_ref"; then
+        run_silent "标记镜像 ${public_ref} -> ${local_ref}" docker tag "$public_ref" "$local_ref"
+        run_silent "推送到本地仓库 ${local_ref}" docker push "$local_ref"
+        return 0
+    fi
+
+    log_warn "镜像拉取失败: ${image}，将在启动时重试"
+    return 1
+}
+
 pull_selected_images() {
     local images=()
 
     for i in "${BASIC_SELECTED[@]}"; do
         case $i in
-            0) images+=("${REGISTRY_SERVER}/${IMAGE_MYSQL}") ;;
-            1) images+=("${REGISTRY_SERVER}/${IMAGE_REDIS}") ;;
-            2) images+=("${REGISTRY_SERVER}/${IMAGE_RABBITMQ}") ;;
-            3) images+=("${REGISTRY_SERVER}/${IMAGE_ELASTICSEARCH}" "${REGISTRY_SERVER}/${IMAGE_KIBANA}") ;;
-            4) images+=("${REGISTRY_SERVER}/${IMAGE_NACOS}") ;;
-            5) images+=("${REGISTRY_SERVER}/${IMAGE_MINIO}") ;;
+            0) images+=("${IMAGE_MYSQL}") ;;
+            1) images+=("${IMAGE_REDIS}") ;;
+            2) images+=("${IMAGE_RABBITMQ}") ;;
+            3) images+=("${IMAGE_ELASTICSEARCH}" "${IMAGE_KIBANA}") ;;
+            4) images+=("${IMAGE_NACOS}") ;;
+            5) images+=("${IMAGE_MINIO}") ;;
         esac
     done
 
     for i in "${UW_SELECTED[@]}"; do
         case $i in
-            0) images+=("${REGISTRY_SERVER}/${IMAGE_UW_GATEWAY}") ;;
-            1) images+=("${REGISTRY_SERVER}/${IMAGE_UW_AUTH_CENTER}") ;;
-            2) images+=("${REGISTRY_SERVER}/${IMAGE_UW_TASK_CENTER}") ;;
-            3) images+=("${REGISTRY_SERVER}/${IMAGE_UW_OPS_CENTER}") ;;
-            4) images+=("${REGISTRY_SERVER}/${IMAGE_UW_GATEWAY_CENTER}") ;;
-            5) images+=("${REGISTRY_SERVER}/${IMAGE_UW_AI_CENTER}") ;;
-            6) images+=("${REGISTRY_SERVER}/${IMAGE_UW_MYDB_CENTER}") ;;
-            7) images+=("${REGISTRY_SERVER}/${IMAGE_UW_MYDB_PROXY}") ;;
-            8) images+=("${REGISTRY_SERVER}/${IMAGE_UW_TINYURL_CENTER}") ;;
-            9) images+=("${REGISTRY_SERVER}/${IMAGE_UW_NOTIFY_CENTER}") ;;
+            0) images+=("${IMAGE_UW_GATEWAY}") ;;
+            1) images+=("${IMAGE_UW_AUTH_CENTER}") ;;
+            2) images+=("${IMAGE_UW_TASK_CENTER}") ;;
+            3) images+=("${IMAGE_UW_OPS_CENTER}") ;;
+            4) images+=("${IMAGE_UW_GATEWAY_CENTER}") ;;
+            5) images+=("${IMAGE_UW_AI_CENTER}") ;;
+            6) images+=("${IMAGE_UW_MYDB_CENTER}") ;;
+            7) images+=("${IMAGE_UW_MYDB_PROXY}") ;;
+            8) images+=("${IMAGE_UW_TINYURL_CENTER}") ;;
+            9) images+=("${IMAGE_UW_NOTIFY_CENTER}") ;;
         esac
     done
 
     for i in "${UI_SELECTED[@]}"; do
         case $i in
-            0) images+=("${REGISTRY_SERVER}/${IMAGE_ROOT_PC_UI}") ;;
-            1) images+=("${REGISTRY_SERVER}/${IMAGE_OPS_PC_UI}") ;;
-            2) images+=("${REGISTRY_SERVER}/${IMAGE_ADMIN_PC_UI}") ;;
+            0) images+=("${IMAGE_ROOT_PC_UI}") ;;
+            1) images+=("${IMAGE_OPS_PC_UI}") ;;
+            2) images+=("${IMAGE_ADMIN_PC_UI}") ;;
         esac
     done
 
     for i in "${SAAS_SELECTED[@]}"; do
         case $i in
-            0) images+=("${REGISTRY_SERVER}/${IMAGE_SAAS_BASE_APP}") ;;
-            1) images+=("${REGISTRY_SERVER}/${IMAGE_SAAS_FINANCE_APP}") ;;
-            2) images+=("${REGISTRY_SERVER}/${IMAGE_SAAS_PC_UI}") ;;
+            0) images+=("${IMAGE_SAAS_BASE_APP}") ;;
+            1) images+=("${IMAGE_SAAS_FINANCE_APP}") ;;
+            2) images+=("${IMAGE_SAAS_PC_UI}") ;;
         esac
     done
 
     for i in "${DEV_SELECTED[@]}"; do
         case $i in
-            0) images+=("${REGISTRY_SERVER}/${IMAGE_GITEA}") ;;
-            1) images+=("${REGISTRY_SERVER}/${IMAGE_NEXUS3}") ;;
-            2) images+=("${REGISTRY_SERVER}/${IMAGE_UW_CODE_CENTER}") ;;
-            3) images+=("${REGISTRY_SERVER}/${IMAGE_MIHOMO}") ;;
+            0) images+=("${IMAGE_GITEA}") ;;
+            1) images+=("${IMAGE_NEXUS3}") ;;
+            2) images+=("${IMAGE_UW_CODE_CENTER}") ;;
+            3) images+=("${IMAGE_MIHOMO}") ;;
         esac
     done
 
     if [ ${#images[@]} -gt 0 ]; then
         log_step "拉取镜像 (${#images[@]} 个)..."
         for img in "${images[@]}"; do
-            run_silent "拉取 ${img}" docker pull "$img" || log_warn "拉取失败: ${img}，将在启动时重试"
+            pull_image_to_local "$img"
         done
         log_ok "镜像拉取完成"
     fi
@@ -637,7 +666,13 @@ import_selected_databases() {
 
     local sql_files=()
 
-    sql_files+=(initUser.sql initNacos.sql)
+    sql_files+=(initUser.sql)
+
+    for i in "${BASIC_SELECTED[@]}"; do
+        case $i in
+            4) sql_files+=(initNacos.sql) ;;
+        esac
+    done
 
     for i in "${UW_SELECTED[@]}"; do
         case $i in
@@ -655,7 +690,7 @@ import_selected_databases() {
     for i in "${SAAS_SELECTED[@]}"; do
         case $i in
             0) sql_files+=(initSaasBase.sql) ;;
-            1) sql_files+=(initSaasFinanceApp.sql) ;;
+            1) sql_files+=(initSaasFinance.sql) ;;
         esac
     done
 
@@ -1067,9 +1102,47 @@ done
 SQL_NEEDED=false
 for i in "${BASIC_SELECTED[@]}"; do [ "$i" = "0" ] && SQL_NEEDED=true; done
 if [ "$SQL_NEEDED" = "true" ]; then
-    log_info "复制 initData -> ${UNIWEB_DIR}/initData/"
-    rm -fr "${UNIWEB_DIR}/initData"
-    cp -r "${REPO_DIR}/initData" "${UNIWEB_DIR}/initData"
+    sql_files=(initUser.sql)
+
+    for i in "${BASIC_SELECTED[@]}"; do
+        case $i in
+            4) sql_files+=(initNacos.sql) ;;
+        esac
+    done
+
+    for i in "${UW_SELECTED[@]}"; do
+        case $i in
+            1) sql_files+=(initAuthCenter.sql) ;;
+            2) sql_files+=(initTaskCenter.sql) ;;
+            3) sql_files+=(initOpsCenter.sql) ;;
+            4) sql_files+=(initGatewayCenter.sql) ;;
+            5) sql_files+=(initMydbCenter.sql) ;;
+            6) sql_files+=(initAiCenter.sql) ;;
+            7) sql_files+=(initTinyurlCenter.sql) ;;
+            8) sql_files+=(initNotifyCenter.sql) ;;
+        esac
+    done
+
+    for i in "${SAAS_SELECTED[@]}"; do
+        case $i in
+            0) sql_files+=(initSaasBase.sql) ;;
+            1) sql_files+=(initSaasFinance.sql) ;;
+        esac
+    done
+
+    for i in "${DEV_SELECTED[@]}"; do
+        case $i in
+            2) sql_files+=(initCodeCenter.sql) ;;
+        esac
+    done
+
+    mkdir -p "${UNIWEB_DIR}/initData"
+    for sql in "${sql_files[@]}"; do
+        if [ -f "${REPO_DIR}/initData/${sql}" ]; then
+            log_info "复制 initData/${sql}"
+            cp "${REPO_DIR}/initData/${sql}" "${UNIWEB_DIR}/initData/${sql}"
+        fi
+    done
 fi
 
 find "${UNIWEB_DIR}/script" -type f -name "*.sh" -exec chmod +x {} \;

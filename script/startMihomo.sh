@@ -10,6 +10,6 @@ CID=$(docker run -d \
 -v /home/mihomo/conf:/root/.config/mihomo \
 ${DOCKER_COMMON_OPTS} \
 --name=mihomo \
-"${IMAGE_MIHOMO}")
+"${REGISTRY_SERVER}/${IMAGE_MIHOMO}")
 
 docker_run_check "$CID" "mihomo"

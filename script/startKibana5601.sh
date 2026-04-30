@@ -17,6 +17,6 @@ CID=$(docker run -d \
 -v /home/kibana5601/plugins:/usr/share/kibana/plugins \
 ${DOCKER_COMMON_OPTS} \
 --name=kibana5601 \
-"${IMAGE_KIBANA}")
+"${REGISTRY_SERVER}/${IMAGE_KIBANA}")
 
 docker_run_check "$CID" "kibana5601"

@@ -12,6 +12,6 @@ CID=$(docker run -d \
 -v /home/rabbitmq5672/data:/var/lib/rabbitmq \
 ${DOCKER_COMMON_OPTS} \
 --name=rabbitmq5672 \
-"${IMAGE_RABBITMQ}")
+"${REGISTRY_SERVER}/${IMAGE_RABBITMQ}")
 
 docker_run_check "$CID" "rabbitmq5672"

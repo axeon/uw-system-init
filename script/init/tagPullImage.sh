@@ -1,29 +1,45 @@
 #!/bin/bash
 # tagPullImage.sh — 从上游仓库拉取镜像并推送到本地仓库
-# 用法: $0 <image:tag> [target_registry]
-# 默认推送到 REGISTRY_SERVER (本机仓库)
-# 流程: pull (UNIWEB_REGISTRY_SERVER) → tag → push (本地仓库)
+# 用法: $0 <image:tag>
+# 流程: 优先 UNIWEB_REGISTRY_SERVER，失败回退 PUBLIC_REGISTRY_SERVER (Docker Hub) → tag → push (REGISTRY_SERVER)
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "${SCRIPT_DIR}/../common.sh"
 
 APP_INFO="$1"
-TARGET_REGISTRY="$2"
 
 if [ -z "$APP_INFO" ]; then
-    echo "[ERROR] 用法: $0 <image:tag> [target_registry]"
+    echo "[ERROR] 用法: $0 <image:tag>"
     exit 1
 fi
 
-DEST_REGISTRY="${TARGET_REGISTRY:-${REGISTRY_SERVER}}"
+DEST_REF="${REGISTRY_SERVER}/${APP_INFO}"
+PUBLIC_REF="${PUBLIC_REGISTRY_SERVER:+${PUBLIC_REGISTRY_SERVER}/}${APP_INFO}"
 
-# Step 1: 从上游仓库拉取
-echo "[INFO] 拉取 ${UNIWEB_REGISTRY_SERVER}/${APP_INFO}..."
-docker pull "${UNIWEB_REGISTRY_SERVER}/${APP_INFO}"
+if docker image inspect "$DEST_REF" &>/dev/null; then
+    echo "[OK] 镜像已存在: ${DEST_REF}"
+    exit 0
+fi
 
-# Step 2: 打标签为本地仓库地址
-echo "[INFO] 标记为 ${DEST_REGISTRY}/${APP_INFO}..."
-docker tag "${UNIWEB_REGISTRY_SERVER}/${APP_INFO}" "${DEST_REGISTRY}/${APP_INFO}"
+PULLED_REF=""
+echo "[INFO] 拉取 ${APP_INFO}..."
 
-# Step 3: 推送到本地仓库
-echo "[INFO] 推送到 ${DEST_REGISTRY}/${APP_INFO}..."
-docker push "${DEST_REGISTRY}/${APP_INFO}"
+UPSTREAM_REF="${UNIWEB_REGISTRY_SERVER}/${APP_INFO}"
+if docker pull "$UPSTREAM_REF"; then
+    PULLED_REF="$UPSTREAM_REF"
+else
+    echo "[WARN] 上游仓库拉取失败，尝试公共仓库..."
+    if docker pull "$PUBLIC_REF"; then
+        PULLED_REF="$PUBLIC_REF"
+    else
+        echo "[ERROR] 镜像拉取失败: ${APP_INFO}"
+        exit 1
+    fi
+fi
+
+echo "[INFO] 标记为 ${DEST_REF}..."
+docker tag "$PULLED_REF" "$DEST_REF"
+
+echo "[INFO] 推送到 ${DEST_REF}..."
+docker push "$DEST_REF"
+
+echo "[OK] 完成: ${DEST_REF}"
