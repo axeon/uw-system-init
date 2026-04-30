@@ -531,8 +531,8 @@ pull_selected_images() {
             2) images+=("${IMAGE_UW_TASK_CENTER}") ;;
             3) images+=("${IMAGE_UW_OPS_CENTER}") ;;
             4) images+=("${IMAGE_UW_GATEWAY_CENTER}") ;;
-            5) images+=("${IMAGE_UW_AI_CENTER}") ;;
-            6) images+=("${IMAGE_UW_MYDB_CENTER}") ;;
+            5) images+=("${IMAGE_UW_MYDB_CENTER}") ;;
+            6) images+=("${IMAGE_UW_AI_CENTER}") ;;
             7) images+=("${IMAGE_UW_MYDB_PROXY}") ;;
             8) images+=("${IMAGE_UW_TINYURL_CENTER}") ;;
             9) images+=("${IMAGE_UW_NOTIFY_CENTER}") ;;
@@ -643,7 +643,10 @@ EOF
     log_ok "ES 环境参数已设置"
 
     log_step "启动 Elasticsearch..."
-    run_log "启动 ES" bash "${SCRIPT_DIR}/startES9200.sh"
+    run_log "启动 ES" bash "${SCRIPT_DIR}/startES9200.sh" || {
+        log_error "ES 容器启动失败"
+        exit 1
+    }
     log_info "等待 ES 就绪..."
     local es_retries=0
     while [ $es_retries -lt 30 ]; do
@@ -1236,8 +1239,8 @@ for i in "${UW_SELECTED[@]}"; do
         2) start_uw_image "${IMAGE_UW_TASK_CENTER}" 10010; sleep 10 ;;
         3) start_uw_image "${IMAGE_UW_OPS_CENTER}" 1000; sleep 10 ;;
         4) start_uw_image "${IMAGE_UW_GATEWAY_CENTER}" 10030 ;;
-        5) start_uw_image "${IMAGE_UW_AI_CENTER}" 10081; sleep 10 ;;
-        6) start_uw_image "${IMAGE_UW_MYDB_CENTER}" 10020; sleep 10 ;;
+        5) start_uw_image "${IMAGE_UW_MYDB_CENTER}" 10020; sleep 10 ;;
+        6) start_uw_image "${IMAGE_UW_AI_CENTER}" 10081; sleep 10 ;;
         7) start_uw_image "${IMAGE_UW_MYDB_PROXY}" 3300 ;;
         8) start_uw_image "${IMAGE_UW_TINYURL_CENTER}" 10060 ;;
         9) start_uw_image "${IMAGE_UW_NOTIFY_CENTER}" 10070 ;;
