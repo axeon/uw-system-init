@@ -5,7 +5,6 @@
 # 选项: --branch <分支名>
 # 流程: 克隆仓库 → 启动 setup.sh 向导 → 清理临时目录
 # ==============================================================================
-set -e
 
 BRANCH="main"
 
@@ -51,4 +50,4 @@ find "$INSTALL_DIR" -type f -name "*.sh" -exec chmod +x {} \;
 
 echo "[INFO] 启动安装向导..."
 cd "$INSTALL_DIR"
-bash setup.sh </dev/tty >/dev/tty 2>&1
+bash setup.sh < /dev/tty

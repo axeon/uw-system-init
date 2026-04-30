@@ -14,7 +14,6 @@
 #   uniweb-system.config  — 部署实例信息 (IP/密码/连接串)
 #   uniweb-registry.config — 镜像配置 (仓库地址/各组件版本)
 # ==============================================================================
-set -e
 
 # ============================================================
 #  全局变量
@@ -25,11 +24,25 @@ UNIWEB_DIR="/root/uniweb"
 SCRIPT_DIR="${UNIWEB_DIR}/script"
 CONFIG_FILE="${UNIWEB_DIR}/uniweb-system.config"
 REGISTRY_FILE="${UNIWEB_DIR}/uniweb-registry.config"
-LOG_FILE="/var/log/uniweb-init.log"
+LOG_DIR="${UNIWEB_DIR}/log"
+LOG_FILE="${LOG_DIR}/uniweb-init.log"
+
+mkdir -p "$LOG_DIR"
 
 # ============================================================
-#  公用方法
+#  日志系统：全局双写（终端 + 文件）
+#  终端保留颜色，日志文件去掉颜色并加时间戳
 # ============================================================
+
+_redir_log() {
+    local line
+    while IFS= read -r line || [ -n "$line" ]; do
+        echo "$line"
+        echo "$(date '+%Y-%m-%d %H:%M:%S') $line" | sed 's/\x1b\[[0-9;]*m//g' >> "$LOG_FILE"
+    done
+}
+
+exec > >(_redir_log) 2>&1
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -38,11 +51,11 @@ BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
-log_info()    { echo -e "${GREEN}[INFO]${NC} $*" | tee -a "$LOG_FILE"; }
-log_warn()    { echo -e "${YELLOW}[WARN]${NC} $*" | tee -a "$LOG_FILE"; }
-log_error()   { echo -e "${RED}[ERROR]${NC} $*" | tee -a "$LOG_FILE"; }
-log_step()    { echo -e "${BLUE}[STEP]${NC} $*" | tee -a "$LOG_FILE"; }
-log_ok()      { echo -e "${CYAN}[OK]${NC} $*" | tee -a "$LOG_FILE"; }
+log_info()   { echo -e "${GREEN}[INFO]${NC} $*"; }
+log_warn()   { echo -e "${YELLOW}[WARN]${NC} $*"; }
+log_error()  { echo -e "${RED}[ERROR]${NC} $*"; }
+log_step()   { echo -e "${BLUE}[STEP]${NC} $*"; }
+log_ok()     { echo -e "${CYAN}[OK]${NC} $*"; }
 
 generate_password() {
     openssl rand -base64 50 | tr -dc A-Z-a-z-0-9 | head -c${1:-32}
@@ -110,7 +123,7 @@ run_checklist() {
         "用 方向键 移动，空格 选择/取消，回车 确认" \
         --separate-output \
         $(( ${#items[@]} + 7 )) 55 ${#items[@]} \
-        "${args[@]}" 3>&1 1>&2 2>&3) || true
+        "${args[@]}" 3>&1 1>&2 2>&3)
     SELECTED=()
     while IFS= read -r line; do
         [ -n "$line" ] && SELECTED+=("$((line - 1))")
