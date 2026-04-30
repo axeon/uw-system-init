@@ -17,7 +17,7 @@
 set -e
 
 # ============================================================
-#  入口
+#  全局变量
 # ============================================================
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -26,6 +26,798 @@ SCRIPT_DIR="${UNIWEB_DIR}/script"
 CONFIG_FILE="${UNIWEB_DIR}/uniweb-system.config"
 REGISTRY_FILE="${UNIWEB_DIR}/uniweb-registry.config"
 LOG_FILE="/var/log/uniweb-init.log"
+
+# ============================================================
+#  公用方法
+# ============================================================
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+log_info()    { echo -e "${GREEN}[INFO]${NC} $*" | tee -a "$LOG_FILE"; }
+log_warn()    { echo -e "${YELLOW}[WARN]${NC} $*" | tee -a "$LOG_FILE"; }
+log_error()   { echo -e "${RED}[ERROR]${NC} $*" | tee -a "$LOG_FILE"; }
+log_step()    { echo -e "${BLUE}[STEP]${NC} $*" | tee -a "$LOG_FILE"; }
+log_ok()      { echo -e "${CYAN}[OK]${NC} $*" | tee -a "$LOG_FILE"; }
+
+generate_password() {
+    openssl rand -base64 50 | tr -dc A-Z-a-z-0-9 | head -c${1:-32}
+}
+
+source_versions() {
+    if [ -f "$REGISTRY_FILE" ]; then
+        source "$REGISTRY_FILE"
+    else
+        local repo_versions="${REPO_DIR}/uniweb-registry.config"
+        if [ -f "$repo_versions" ]; then
+            source "$repo_versions"
+        else
+            log_error "uniweb-registry.config 未找到"
+            exit 1
+        fi
+    fi
+}
+
+source_config() {
+    if [ ! -f "$CONFIG_FILE" ]; then
+        log_error "uniweb-system.config 不存在，请先运行配置生成"
+        exit 1
+    fi
+    while IFS='=' read -r key value; do
+        case "$key" in
+            \#*|"") continue ;;
+        esac
+        export "$key=$value"
+    done < "$CONFIG_FILE"
+}
+
+check_root() {
+    if [ "$EUID" -ne 0 ]; then
+        log_error "请使用 root 用户运行此脚本"
+        exit 1
+    fi
+}
+
+print_banner() {
+    echo -e "${CYAN}"
+    echo "╔══════════════════════════════════════════════╗"
+    echo "║        UniWeb 服务器初始化安装向导             ║"
+    echo "╚══════════════════════════════════════════════╝"
+    echo -e "${NC}"
+}
+
+run_checklist() {
+    local title="$1"
+    local defaults="$2"
+    shift 2
+    local items=("$@")
+    local args=()
+    local idx=0
+    for item in "${items[@]}"; do
+        local state="OFF"
+        for d in $defaults; do
+            if [ "$d" = "$idx" ]; then state="ON"; break; fi
+        done
+        args+=("$item" "" "$state")
+        idx=$((idx + 1))
+    done
+    local result
+    result=$(whiptail --title "$title" --checklist \
+        "用 方向键 移动，空格 选择/取消，回车 确认" \
+        --separate-output \
+        $(( ${#items[@]} + 7 )) 55 ${#items[@]} \
+        "${args[@]}" 3>&1 1>&2 2>&3)
+    SELECTED=()
+    while IFS= read -r line; do
+        [ -n "$line" ] && SELECTED+=("$((line - 1))")
+    done <<< "$result"
+}
+
+# ============================================================
+#  阶段 1: 系统依赖
+# ============================================================
+
+install_system_deps() {
+    log_step "安装系统依赖..."
+    apt-get update -y
+    apt-get install -y ca-certificates curl gnupg apache2-utils whiptail
+    log_ok "系统依赖安装完成"
+}
+
+# ============================================================
+#  阶段 2: 配置生成
+# ============================================================
+
+generate_config() {
+    read -p "请输入系统名称（如: my-company）: " SYSTEM_NAME
+    SYSTEM_NAME="${SYSTEM_NAME:-uniweb}"
+    log_info "系统名称: $SYSTEM_NAME"
+
+    HOST_IPS=$(ip addr show | awk '/inet / && !/172\.1[6-9]\./ && !/172\.2[0-9]\./ && !/172\.3[0-1]\./ {print $2}' | cut -d/ -f1)
+
+    HOST_IP="127.0.0.1"
+    if [ "$(echo "$HOST_IPS" | wc -w)" -eq 1 ]; then
+        HOST_IP="$HOST_IPS"
+        log_info "本机IP是: $HOST_IP"
+    else
+        echo "本机有多个IP，请选择一个IP作为配置文件的主机配置:"
+        select HOST_IP in $HOST_IPS; do
+            if [ -n "$HOST_IP" ]; then
+                log_info "您选择的IP地址是: $HOST_IP"
+                break
+            else
+                echo "无效的选择，请重新选择。"
+            fi
+        done
+    fi
+
+    cat > "$CONFIG_FILE" << EOF
+# UniWeb 部署配置文件 [$(date --rfc-3339=seconds)]
+# 系统名称
+SYSTEM_NAME=${SYSTEM_NAME}
+# 系统IP
+SYSTEM_IP=${HOST_IP}
+# DOCKER仓库相关配置
+REGISTRY_SERVER=${HOST_IP}:5000
+REGISTRY_USERNAME=registry
+REGISTRY_PASSWORD=$(generate_password)
+
+# MYSQL相关配置
+MYSQL_HOST=${HOST_IP}
+MYSQL_PORT=3308
+MYSQL_ROOT_USERNAME=root
+MYSQL_ROOT_PASSWORD=$(generate_password)
+MYSQL_NACOS_PASSWORD=$(generate_password)
+MYSQL_UW_PASSWORD=$(generate_password)
+MYSQL_SAAS_PASSWORD=$(generate_password)
+
+# NACOS相关配置
+NACOS_SERVER=${HOST_IP}:8848
+NACOS_USERNAME=nacos
+NACOS_PASSWORD=$(generate_password)
+NACOS_NAMESPACE=test
+NACOS_IDENTITY_KEY=$(generate_password)
+NACOS_IDENTITY_VALUE=$(generate_password)
+NACOS_TOKEN_KEY=$(generate_password | base64 | tr -d '\n')
+
+# ES相关配置
+LOG_ES_SERVER=http://${HOST_IP}:9200
+LOG_ES_USERNAME=elastic
+LOG_ES_PASSWORD=$(generate_password)
+
+# REDIS相关配置
+REDIS_HOST=${HOST_IP}
+REDIS_PORT=6380
+REDIS_SSL=false
+REDIS_USERNAME=
+REDIS_PASSWORD=$(generate_password)
+
+# RABBITMQ相关配置
+RABBITMQ_HOST=${HOST_IP}
+RABBITMQ_PORT=5672
+RABBITMQ_SSL=false
+RABBITMQ_USERNAME=rabbit
+RABBITMQ_PASSWORD=$(generate_password)
+
+# MINIO相关配置
+MINIO_SERVER=http://${HOST_IP}:9000
+MINIO_ROOT_USERNAME=minio
+MINIO_ROOT_PASSWORD=$(generate_password)
+
+# GATEWAY相关配置
+GATEWAY_SERVER=http://${HOST_IP}
+
+# MSC账号相关配置
+MSC_ROOT_PASSWORD=$(generate_password)
+MSC_RPC_PASSWORD=$(generate_password)
+MSC_OPS_PASSWORD=$(generate_password)
+MSC_ADMIN_PASSWORD=$(generate_password)
+EOF
+
+    chmod 600 "$CONFIG_FILE"
+    log_ok "配置文件已生成: $CONFIG_FILE"
+}
+
+show_config() {
+    echo ""
+    echo "═══════════════════════════════════════"
+    echo "  配置文件摘要: $CONFIG_FILE"
+    echo "═══════════════════════════════════════"
+    grep -v '^$\|^\#' "$CONFIG_FILE" | column -t -s'='
+    echo "═══════════════════════════════════════"
+    echo ""
+}
+
+# ============================================================
+#  阶段 3: 配置应用
+# ============================================================
+
+apply_config() {
+    if [ ! -f "$CONFIG_FILE" ]; then
+        log_error "配置文件不存在: $CONFIG_FILE"
+        exit 1
+    fi
+
+    log_step "开始替换配置变量..."
+
+    while IFS='=' read -r key value; do
+        case "$key" in
+            \#*|"") continue ;;
+        esac
+        log_info "替换变量 $key => $value"
+        find "$REPO_DIR" -type f -not -path "*/.git/*" -print0 | xargs -0 sed -i "s|#{${key}}|${value}|g"
+        if [[ $key == *"_PASSWORD" ]]; then
+            local bcrypt_value
+            bcrypt_value=$(htpasswd -nbBC 10 test "$value" | cut -c 6-)
+            log_info "替换BCRYPT密码变量 ${key}_BCRYPT"
+            find "$REPO_DIR" -type f -not -path "*/.git/*" -print0 | xargs -0 sed -i "s|#{${key}_BCRYPT}|${bcrypt_value}|g"
+        fi
+    done < "$CONFIG_FILE"
+
+    log_ok "配置替换完成"
+}
+
+# ============================================================
+#  Docker + Registry
+# ============================================================
+
+install_docker() {
+    source_config
+    source_versions
+    log_step "安装 Docker..."
+
+    install -m 0755 -d /etc/apt/keyrings
+    curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
+    chmod a+r /etc/apt/keyrings/docker.asc
+
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian \
+$(. /etc/os-release && echo "$VERSION_CODENAME") stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+    apt-get update -y
+    apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+    cat > /etc/docker/daemon.json << EOF
+{
+  "live-restore": true,
+  "registry-mirrors": ["https://docker.1panel.live"],
+  "data-root":"/home/docker/lib",
+  "log-driver": "json-file",
+  "log-opts": { "max-size": "100m", "max-file": "3" },
+  "insecure-registries":["${UNIWEB_REGISTRY_SERVER}","127.0.0.1:5000","${REGISTRY_SERVER}"]
+}
+EOF
+
+    cat > /etc/containerd/config.toml << 'EOF'
+disabled_plugins = ["cri"]
+root = "/home/docker/containerd"
+state = "/home/docker/containerd/state"
+EOF
+
+    mkdir -p /home/docker/lib /home/docker/containerd /home/docker/containerd/state
+    systemctl daemon-reload
+    systemctl restart containerd
+    systemctl restart docker
+    log_ok "Docker 安装完成"
+}
+
+install_registry() {
+    source_config
+    log_step "启动 Registry 镜像仓库..."
+    bash "${SCRIPT_DIR}/startRegistry5000.sh"
+
+    log_info "设置 Registry 密码..."
+    mkdir -p /home/registry/auth
+    htpasswd -Bbc /home/registry/auth/htpasswd "$REGISTRY_USERNAME" "$REGISTRY_PASSWORD"
+    docker login --username="$REGISTRY_USERNAME" --password="$REGISTRY_PASSWORD" "$REGISTRY_SERVER"
+    log_ok "Registry 安装完成"
+}
+
+# ============================================================
+#  镜像拉取（按需）
+# ============================================================
+
+pull_selected_images() {
+    local images=()
+
+    for i in "${BASIC_SELECTED[@]}"; do
+        case $i in
+            0) images+=("${REGISTRY_SERVER}/${IMAGE_MYSQL}") ;;
+            1) images+=("${REGISTRY_SERVER}/${IMAGE_REDIS}") ;;
+            2) images+=("${REGISTRY_SERVER}/${IMAGE_RABBITMQ}") ;;
+            3) images+=("${REGISTRY_SERVER}/${IMAGE_ELASTICSEARCH}" "${REGISTRY_SERVER}/${IMAGE_KIBANA}") ;;
+            4) images+=("${REGISTRY_SERVER}/${IMAGE_NACOS}") ;;
+            5) images+=("${REGISTRY_SERVER}/${IMAGE_MINIO}") ;;
+        esac
+    done
+
+    for i in "${UW_SELECTED[@]}"; do
+        case $i in
+            0) images+=("${REGISTRY_SERVER}/${IMAGE_UW_GATEWAY}") ;;
+            1) images+=("${REGISTRY_SERVER}/${IMAGE_UW_AUTH_CENTER}") ;;
+            2) images+=("${REGISTRY_SERVER}/${IMAGE_UW_TASK_CENTER}") ;;
+            3) images+=("${REGISTRY_SERVER}/${IMAGE_UW_OPS_CENTER}") ;;
+            4) images+=("${REGISTRY_SERVER}/${IMAGE_UW_GATEWAY_CENTER}") ;;
+            5) images+=("${REGISTRY_SERVER}/${IMAGE_UW_AI_CENTER}") ;;
+            6) images+=("${REGISTRY_SERVER}/${IMAGE_UW_MYDB_CENTER}") ;;
+            7) images+=("${REGISTRY_SERVER}/${IMAGE_UW_MYDB_PROXY}") ;;
+            8) images+=("${REGISTRY_SERVER}/${IMAGE_UW_TINYURL_CENTER}") ;;
+            9) images+=("${REGISTRY_SERVER}/${IMAGE_UW_NOTIFY_CENTER}") ;;
+        esac
+    done
+
+    for i in "${UI_SELECTED[@]}"; do
+        case $i in
+            0) images+=("${REGISTRY_SERVER}/${IMAGE_ROOT_PC_UI}") ;;
+            1) images+=("${REGISTRY_SERVER}/${IMAGE_OPS_PC_UI}") ;;
+            2) images+=("${REGISTRY_SERVER}/${IMAGE_ADMIN_PC_UI}") ;;
+        esac
+    done
+
+    for i in "${SAAS_SELECTED[@]}"; do
+        case $i in
+            0) images+=("${REGISTRY_SERVER}/${IMAGE_SAAS_BASE_APP}") ;;
+            1) images+=("${REGISTRY_SERVER}/${IMAGE_SAAS_FINANCE_APP}") ;;
+            2) images+=("${REGISTRY_SERVER}/${IMAGE_SAAS_PC_UI}") ;;
+        esac
+    done
+
+    for i in "${DEV_SELECTED[@]}"; do
+        case $i in
+            0) images+=("${REGISTRY_SERVER}/${IMAGE_GITEA}") ;;
+            1) images+=("${REGISTRY_SERVER}/${IMAGE_NEXUS3}") ;;
+            2) images+=("${REGISTRY_SERVER}/${IMAGE_UW_CODE_CENTER}") ;;
+            3) images+=("${REGISTRY_SERVER}/${IMAGE_MIHOMO}") ;;
+        esac
+    done
+
+    if [ ${#images[@]} -gt 0 ]; then
+        log_step "拉取镜像 (${#images[@]} 个)..."
+        for img in "${images[@]}"; do
+            log_info "拉取 ${img}..."
+            docker pull "$img" || log_warn "拉取失败: ${img}，将在启动时重试"
+        done
+        log_ok "镜像拉取完成"
+    fi
+}
+
+# ============================================================
+#  基础服务启动
+# ============================================================
+
+setup_mysql() {
+    source_config
+    log_step "启动 MySQL..."
+    bash "${SCRIPT_DIR}/startMydbMysql3308.sh"
+    log_info "等待 MySQL 就绪..."
+    local retries=0
+    while [ $retries -lt 30 ]; do
+        if docker exec -i uw-mydb-mysql-3308 mysqladmin ping -h 127.0.0.1 -P 3308 -u root -p"${MYSQL_ROOT_PASSWORD}" --silent 2>/dev/null; then
+            log_ok "MySQL 已启动"
+            return
+        fi
+        retries=$((retries + 1))
+        echo "  等待 MySQL... ($retries/30)"
+        sleep 2
+    done
+    log_error "MySQL 等待超时"
+    exit 1
+}
+
+setup_redis() {
+    log_step "启动 Redis..."
+    bash "${SCRIPT_DIR}/startRedis6380.sh"
+    log_ok "Redis 已启动"
+}
+
+setup_rabbitmq() {
+    log_step "启动 RabbitMQ..."
+    bash "${SCRIPT_DIR}/startRabbitMQ5672.sh"
+    log_ok "RabbitMQ 已启动"
+}
+
+setup_es() {
+    log_step "初始化 ES 环境..."
+
+    grep -q 'vm.max_map_count=262144' /etc/sysctl.conf 2>/dev/null || {
+        cat >> /etc/sysctl.conf <<'EOF'
+vm.max_map_count=262144
+fs.file-max=6815744
+EOF
+    }
+    sysctl -p 2>/dev/null | tail -5
+
+    ulimit -n 65535
+    ulimit -u 32768
+    ulimit -l unlimited
+
+    grep -q 'soft nofile 65535' /etc/security/limits.conf 2>/dev/null || {
+        cat >> /etc/security/limits.conf <<'EOF'
+* soft nofile 65535
+* hard nofile 65535
+* soft nproc 32768
+* hard nproc 32768
+* soft memlock unlimited
+* hard memlock unlimited
+EOF
+    }
+
+    log_ok "ES 环境参数已设置"
+
+    log_step "启动 Elasticsearch..."
+    bash "${SCRIPT_DIR}/startES9200.sh"
+    log_info "等待 ES 就绪..."
+    local es_retries=0
+    while [ $es_retries -lt 30 ]; do
+        if curl -sk -u "${LOG_ES_USERNAME}:${LOG_ES_PASSWORD}" "${LOG_ES_SERVER}/_cluster/health" > /dev/null 2>&1; then
+            log_ok "ES 已就绪"
+            break
+        fi
+        es_retries=$((es_retries + 1))
+        echo "  等待 ES... ($es_retries/30)"
+        sleep 2
+    done
+    if [ $es_retries -ge 30 ]; then
+        log_error "ES 等待超时"
+        exit 1
+    fi
+
+    log_step "初始化 ES 配置（数据流 + Kibana Token）..."
+
+    local http_code
+    http_code=$(curl -sk -o /dev/null -w "%{http_code}" -u "${LOG_ES_USERNAME}:${LOG_ES_PASSWORD}" -H "Content-Type: application/json" -d '
+{
+  "priority": 9,
+  "template": {
+    "settings": { "index": { "number_of_replicas": "0", "refresh_interval": "10s" } },
+    "mappings": {
+      "dynamic": true, "numeric_detection": false, "date_detection": true,
+      "dynamic_date_formats": ["strict_date_optional_time","yyyy/MM/dd HH:mm:ss Z||yyyy/MM/dd Z"],
+      "_source": { "enabled": true, "includes": [], "excludes": [] },
+      "_routing": { "required": false }, "subobjects": true, "dynamic_templates": []
+    },
+    "lifecycle": { "enabled": true, "data_retention": "30d" }
+  },
+  "index_patterns": ["uw-*","saas-*","*-app","*-center"],
+  "data_stream": { "hidden": false, "allow_custom_routing": false },
+  "composed_of": []
+}
+' -X PUT "${LOG_ES_SERVER}/_index_template/uw-app-log")
+    if [ "$http_code" -ge 200 ] && [ "$http_code" -lt 300 ]; then
+        log_ok "索引模板 uw-app-log 创建成功 ($http_code)"
+    else
+        log_warn "索引模板 uw-app-log 创建失败 (HTTP $http_code)"
+    fi
+
+    http_code=$(curl -sk -o /dev/null -w "%{http_code}" -u "${LOG_ES_USERNAME}:${LOG_ES_PASSWORD}" -H "Content-Type: application/json" -d '
+{
+  "priority": 10,
+  "template": {
+    "settings": { "index": { "number_of_replicas": "0", "refresh_interval": "10s" } },
+    "mappings": {
+      "_source": { "excludes": [], "includes": [], "enabled": true },
+      "_routing": { "required": false }, "dynamic": true, "numeric_detection": false,
+      "date_detection": true,
+      "dynamic_date_formats": ["strict_date_optional_time","yyyy/MM/dd HH:mm:ss Z||yyyy/MM/dd Z"],
+      "subobjects": true, "dynamic_templates": []
+    },
+    "lifecycle": { "enabled": true, "data_retention": "180d" }
+  },
+  "index_patterns": ["*.log"],
+  "data_stream": { "hidden": false, "allow_custom_routing": false }
+}
+' -X PUT "${LOG_ES_SERVER}/_index_template/uw-biz-log")
+    if [ "$http_code" -ge 200 ] && [ "$http_code" -lt 300 ]; then
+        log_ok "索引模板 uw-biz-log 创建成功 ($http_code)"
+    else
+        log_warn "索引模板 uw-biz-log 创建失败 (HTTP $http_code)"
+    fi
+
+    ELASTICSEARCH_SERVICE_ACCOUNT_TOKEN=$(docker exec es9200 /usr/share/elasticsearch/bin/elasticsearch-service-tokens create elastic/kibana my-token|awk -F ' = ' '{print $NF}'|sed 's/\r//g')
+    log_info "替换变量ELASTICSEARCH_SERVICE_ACCOUNT_TOKEN=${ELASTICSEARCH_SERVICE_ACCOUNT_TOKEN}"
+    find "/home/kibana5601/config" -type f -exec sed -i "s|#{ELASTICSEARCH_SERVICE_ACCOUNT_TOKEN}|${ELASTICSEARCH_SERVICE_ACCOUNT_TOKEN}|g" {} +
+
+    log_ok "ES 配置初始化完成"
+
+    log_step "启动 Kibana..."
+    bash "${SCRIPT_DIR}/startKibana5601.sh"
+    log_ok "Kibana 已启动"
+}
+
+setup_nacos() {
+    log_step "启动 Nacos..."
+    bash "${SCRIPT_DIR}/startNacos8848.sh"
+    log_ok "Nacos 已启动"
+}
+
+setup_minio() {
+    log_step "启动 MinIO..."
+    bash "${SCRIPT_DIR}/startMinio9000.sh"
+    log_ok "MinIO 已启动"
+}
+
+# ============================================================
+#  数据库导入（基础服务启动后）
+# ============================================================
+
+import_selected_databases() {
+    if ! docker ps --format '{{.Names}}' | grep -q '^uw-mydb-mysql-3308$'; then
+        log_warn "MySQL 容器未运行，跳过数据库导入"
+        return
+    fi
+
+    local sql_files=()
+
+    sql_files+=(initUser.sql initNacos.sql)
+
+    for i in "${UW_SELECTED[@]}"; do
+        case $i in
+            1) sql_files+=(initAuthCenter.sql) ;;
+            2) sql_files+=(initTaskCenter.sql) ;;
+            3) sql_files+=(initOpsCenter.sql) ;;
+            4) sql_files+=(initGatewayCenter.sql) ;;
+            5) sql_files+=(initMydbCenter.sql) ;;
+            6) sql_files+=(initAiCenter.sql) ;;
+            7) sql_files+=(initTinyurlCenter.sql) ;;
+            8) sql_files+=(initNotifyCenter.sql) ;;
+        esac
+    done
+
+    for i in "${SAAS_SELECTED[@]}"; do
+        case $i in
+            0) sql_files+=(initSaasBase.sql) ;;
+            1) sql_files+=(initSaasFinanceApp.sql) ;;
+        esac
+    done
+
+    for i in "${DEV_SELECTED[@]}"; do
+        case $i in
+            2) sql_files+=(initCodeCenter.sql) ;;
+        esac
+    done
+
+    if [ ${#sql_files[@]} -gt 0 ]; then
+        local unique_sqls=()
+        for sql in "${sql_files[@]}"; do
+            local found=false
+            for u in "${unique_sqls[@]}"; do
+                [ "$sql" = "$u" ] && found=true && break
+            done
+            [ "$found" = "false" ] && unique_sqls+=("$sql")
+        done
+
+        log_step "导入数据库 (${#unique_sqls[@]} 个)..."
+        bash "${SCRIPT_DIR}/init/initMysqlData.sh" "${unique_sqls[@]}"
+        log_ok "数据库导入完成"
+    fi
+}
+
+# ============================================================
+#  微服务 / UI 启动
+# ============================================================
+
+start_uw_image() {
+    local image="$1"
+    local port="$2"
+    local mem_limit="${3:-0}"
+    local name="${image%%:*}"
+    local version="${image#*:}"
+    log_step "启动 ${name}..."
+    bash "${SCRIPT_DIR}/startApp.sh" "$name" "$version" "$port" "$mem_limit"
+    log_ok "${name} 已启动 (${port})"
+}
+
+start_uw_ui_image() {
+    local image="$1"
+    local port="$2"
+    local name="${image%%:*}"
+    local version="${image#*:}"
+    log_step "启动 ${name}..."
+    bash "${SCRIPT_DIR}/startUI.sh" "$name" "$version" "$port"
+    log_ok "${name} 已启动 (${port})"
+}
+
+# ============================================================
+#  开发服务
+# ============================================================
+
+setup_gitea() {
+    log_step "启动 Gitea..."
+    bash "${SCRIPT_DIR}/startGitea.sh"
+    log_ok "Gitea 已启动"
+}
+
+setup_nexus3() {
+    log_step "启动 Nexus3..."
+    bash "${SCRIPT_DIR}/startNexus3.sh"
+    log_ok "Nexus3 已启动"
+}
+
+setup_mihomo() {
+    log_step "启动 Mihomo..."
+    bash "${SCRIPT_DIR}/startMihomo.sh"
+    log_ok "Mihomo 已启动"
+}
+
+init_ops() {
+    log_step "===== OPS 初始化 ====="
+    log_info "等待服务就绪，安装 ops-agent..."
+    sleep 60
+    local ops_retries=0
+    while [ $ops_retries -lt 10 ]; do
+        local installer
+        installer=$(curl -sf "${GATEWAY_SERVER}/uw-ops-center/agent/installer/install" 2>/dev/null) && break
+        ops_retries=$((ops_retries + 1))
+        log_warn "ops-agent 安装脚本获取失败，重试 ($ops_retries/10)..."
+        sleep 10
+    done
+    if [ $ops_retries -ge 10 ]; then
+        log_error "ops-agent 安装脚本获取失败，请手动安装"
+        exit 1
+    fi
+    echo "$installer" | bash
+    log_ok "ops-agent 已安装，OPS 已接管本机"
+}
+
+# ============================================================
+#  从机安装脚本生成 + HTTP 服务
+# ============================================================
+
+generate_slave_installer() {
+    source_config
+    local slave_script="${UNIWEB_DIR}/installSlave.sh"
+
+    cat > "$slave_script" << 'SLAVE_EOF'
+#!/bin/bash
+set -e
+
+SLAVE_EOF
+
+    cat >> "$slave_script" << EOF
+REGISTRY_SERVER="${REGISTRY_SERVER}"
+REGISTRY_USERNAME="${REGISTRY_USERNAME}"
+REGISTRY_PASSWORD="${REGISTRY_PASSWORD}"
+GATEWAY_SERVER="${GATEWAY_SERVER}"
+MASTER_IP="${SYSTEM_IP}"
+
+EOF
+
+    cat >> "$slave_script" << 'SLAVE_BODY'
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+log_info()  { echo -e "${GREEN}[INFO]${NC} $*"; }
+log_step()  { echo -e "${CYAN}[STEP]${NC} $*"; }
+log_ok()    { echo -e "${CYAN}[OK]${NC} $*"; }
+
+[ "$EUID" -ne 0 ] && { echo "请使用 root 用户运行"; exit 1; }
+
+log_step "安装系统依赖..."
+apt-get update -y
+apt-get install -y ca-certificates curl gnupg
+install -m 0755 -d /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
+chmod a+r /etc/apt/keyrings/docker.asc
+
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian \
+$(. /etc/os-release && echo "$VERSION_CODENAME") stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+apt-get update -y
+apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+cat > /etc/containerd/config.toml << 'DAEMON_CTR'
+disabled_plugins = ["cri"]
+root = "/home/docker/containerd"
+state = "/home/docker/containerd/state"
+DAEMON_CTR
+
+cat > /etc/docker/daemon.json << DAEMON_EOF
+{
+  "live-restore": true,
+  "registry-mirrors": ["https://docker.1panel.live"],
+  "data-root":"/home/docker/lib",
+  "insecure-registries":["${REGISTRY_SERVER}","127.0.0.1:5000"]
+}
+DAEMON_EOF
+
+mkdir -p /home/docker/lib /home/docker/containerd /home/docker/containerd/state
+systemctl daemon-reload
+systemctl restart containerd
+systemctl restart docker
+
+log_step "登录镜像仓库..."
+docker login --username="${REGISTRY_USERNAME}" --password="${REGISTRY_PASSWORD}" "${REGISTRY_SERVER}"
+
+log_step "安装 ops-agent..."
+sleep 10
+OPS_RETRY=0
+while [ $OPS_RETRY -lt 10 ]; do
+    OPS_INSTALLER=$(curl -sf "${GATEWAY_SERVER}/uw-ops-center/agent/installer/install") && break
+    OPS_RETRY=$((OPS_RETRY + 1))
+    echo "[WARN] ops-agent 安装脚本获取失败，重试 ($OPS_RETRY/10)..."
+    sleep 10
+done
+if [ -n "$OPS_INSTALLER" ]; then
+    echo "$OPS_INSTALLER" | bash
+else
+    echo "[ERROR] ops-agent 安装脚本获取失败，请手动安装"
+    exit 1
+fi
+
+log_ok "从机安装完成！"
+log_info "ops-agent 已启动，Master 可通过 ${GATEWAY_SERVER} 管理本机"
+SLAVE_BODY
+
+    chmod +x "$slave_script"
+    log_ok "从机安装脚本已生成: $slave_script"
+}
+
+setup_slave_server() {
+    source_config
+    local port="${1:-8888}"
+
+    generate_slave_installer
+
+    cat > "${UNIWEB_DIR}/slave-httpd.sh" << 'HTTPD'
+#!/bin/bash
+RESPONSE=$(cat /root/uniweb/installSlave.sh)
+CONTENT_LENGTH=${#RESPONSE}
+cat > /dev/null
+echo -ne "HTTP/1.1 200 OK\r\nContent-Type: text/x-shellscript\r\nContent-Length: ${CONTENT_LENGTH}\r\nConnection: close\r\n\r\n${RESPONSE}"
+HTTPD
+    chmod +x "${UNIWEB_DIR}/slave-httpd.sh"
+
+    cat > /etc/systemd/system/uniweb-slave-server.socket << EOF
+[Unit]
+Description=UniWeb Slave Installer Socket
+
+[Socket]
+ListenStream=${port}
+Accept=yes
+
+[Install]
+WantedBy=sockets.target
+EOF
+
+    cat > /etc/systemd/system/uniweb-slave-server@.service << EOF
+[Unit]
+Description=UniWeb Slave Installer Handler
+
+[Service]
+Type=simple
+ExecStart=${UNIWEB_DIR}/slave-httpd.sh
+StandardInput=socket
+StandardOutput=socket
+EOF
+
+    systemctl stop uniweb-slave-server.socket 2>/dev/null || true
+    systemctl stop uniweb-slave-server.service 2>/dev/null || true
+    systemctl daemon-reload
+    systemctl enable uniweb-slave-server.socket
+    systemctl start uniweb-slave-server.socket
+
+    local master_ip
+    master_ip=$(ip addr show | awk '/inet / && /10\.|192\.168\./ {print $2}' | head -1 | cut -d/ -f1)
+    if [ -z "$master_ip" ]; then
+        master_ip=$(hostname -I | awk '{print $1}')
+    fi
+
+    log_ok "从机安装服务已启动 (端口 ${port})"
+    log_ok "从机安装命令:"
+    echo ""
+    echo -e "  ${CYAN}curl -fsSL http://${master_ip}:${port}/installSlave.sh | bash${NC}"
+    echo ""
+    log_info "管理命令:"
+    echo "  systemctl status uniweb-slave-server.socket"
+    echo "  systemctl stop uniweb-slave-server.socket"
+    echo "  systemctl disable uniweb-slave-server.socket"
+}
+
+# ============================================================
+#  主流程入口
+# ============================================================
 
 check_root
 print_banner
@@ -161,18 +953,14 @@ log_ok "文件分发完成"
 # --- 执行安装 ---
 log_step "===== 开始安装 ====="
 
-# 加载镜像版本 + 部署配置到环境变量
 source_versions
 source_config
 
-# Docker 引擎 + 本地 Registry (所有镜像的中转站)
 install_docker
 install_registry
 
-# 从上游仓库搬运选中镜像到本地 Registry
 pull_selected_images
 
-# --- 启动 MySQL + 导入数据库（必须最先，Nacos 等依赖其数据）---
 MYSQL_INSTALLED=false
 for i in "${BASIC_SELECTED[@]}"; do
     case $i in
@@ -184,7 +972,6 @@ if [ "$MYSQL_INSTALLED" = "true" ]; then
     import_selected_databases
 fi
 
-# --- 启动其余基础服务 (Redis/RabbitMQ/ES+Kibana/Nacos/MinIO) ---
 for i in "${BASIC_SELECTED[@]}"; do
     case $i in
         0) ;;
@@ -196,7 +983,6 @@ for i in "${BASIC_SELECTED[@]}"; do
     esac
 done
 
-# --- 启动 UniWeb 微服务（按菜单顺序）---
 for i in "${UW_SELECTED[@]}"; do
     case $i in
         0) start_uw_image "${IMAGE_UW_GATEWAY}" 80 ;;
@@ -212,7 +998,6 @@ for i in "${UW_SELECTED[@]}"; do
     esac
 done
 
-# --- 启动 UniWeb 前端 ---
 for i in "${UI_SELECTED[@]}"; do
     case $i in
         0) start_uw_ui_image "${IMAGE_ROOT_PC_UI}" 30100 ;;
@@ -221,7 +1006,6 @@ for i in "${UI_SELECTED[@]}"; do
     esac
 done
 
-# --- 启动 SaaS 服务 ---
 for i in "${SAAS_SELECTED[@]}"; do
     case $i in
         0) start_uw_image "${IMAGE_SAAS_BASE_APP}" 20000; sleep 10 ;;
@@ -230,7 +1014,6 @@ for i in "${SAAS_SELECTED[@]}"; do
     esac
 done
 
-# --- 启动开发服务 ---
 for i in "${DEV_SELECTED[@]}"; do
     case $i in
         0) setup_gitea ;;
@@ -242,10 +1025,8 @@ done
 
 log_ok "===== 服务安装完成 ====="
 
-# --- OPS 初始化 ---
 init_ops
 
-# --- 从机安装服务 ---
 setup_slave_server
 
 log_ok "===== 全部完成 ====="
@@ -254,752 +1035,3 @@ log_info "配置文件: ${CONFIG_FILE}"
 log_info "镜像配置: ${REGISTRY_FILE}"
 log_info "脚本目录: ${SCRIPT_DIR}"
 log_info "日志文件: ${LOG_FILE}"
-
-# ============================================================
-#  阶段函数（按执行顺序排列）
-# ============================================================
-
-# ============================================================
-#  阶段 1: 系统依赖
-# ============================================================
-
-install_system_deps() {
-    log_step "安装系统依赖..."
-    apt-get update -y
-    apt-get install -y ca-certificates curl gnupg apache2-utils whiptail
-    log_ok "系统依赖安装完成"
-}
-
-# ============================================================
-#  阶段 2: 配置生成
-# ============================================================
-
-generate_config() {
-    read -p "请输入系统名称（如: my-company）: " SYSTEM_NAME
-    SYSTEM_NAME="${SYSTEM_NAME:-uniweb}"
-    log_info "系统名称: $SYSTEM_NAME"
-
-    # 自动检测本机 IP，多 IP 时交互选择
-    HOST_IPS=$(ip addr show | awk '/inet / && !/172\.1[6-9]\./ && !/172\.2[0-9]\./ && !/172\.3[0-1]\./ {print $2}' | cut -d/ -f1)
-
-    HOST_IP="127.0.0.1"
-    if [ "$(echo "$HOST_IPS" | wc -w)" -eq 1 ]; then
-        HOST_IP="$HOST_IPS"
-        log_info "本机IP是: $HOST_IP"
-    else
-        echo "本机有多个IP，请选择一个IP作为配置文件的主机配置:"
-        select HOST_IP in $HOST_IPS; do
-            if [ -n "$HOST_IP" ]; then
-                log_info "您选择的IP地址是: $HOST_IP"
-                break
-            else
-                echo "无效的选择，请重新选择。"
-            fi
-        done
-    fi
-
-    cat > "$CONFIG_FILE" << EOF
-# UniWeb 部署配置文件 [$(date --rfc-3339=seconds)]
-# 系统名称
-SYSTEM_NAME=${SYSTEM_NAME}
-# 系统IP
-SYSTEM_IP=${HOST_IP}
-# DOCKER仓库相关配置
-REGISTRY_SERVER=${HOST_IP}:5000
-REGISTRY_USERNAME=registry
-REGISTRY_PASSWORD=$(generate_password)
-
-# MYSQL相关配置
-MYSQL_HOST=${HOST_IP}
-MYSQL_PORT=3308
-MYSQL_ROOT_USERNAME=root
-MYSQL_ROOT_PASSWORD=$(generate_password)
-MYSQL_NACOS_PASSWORD=$(generate_password)
-MYSQL_UW_PASSWORD=$(generate_password)
-MYSQL_SAAS_PASSWORD=$(generate_password)
-
-# NACOS相关配置
-NACOS_SERVER=${HOST_IP}:8848
-NACOS_USERNAME=nacos
-NACOS_PASSWORD=$(generate_password)
-NACOS_NAMESPACE=test
-NACOS_IDENTITY_KEY=$(generate_password)
-NACOS_IDENTITY_VALUE=$(generate_password)
-NACOS_TOKEN_KEY=$(generate_password | base64 | tr -d '\n')
-
-# ES相关配置
-LOG_ES_SERVER=http://${HOST_IP}:9200
-LOG_ES_USERNAME=elastic
-LOG_ES_PASSWORD=$(generate_password)
-
-# REDIS相关配置
-REDIS_HOST=${HOST_IP}
-REDIS_PORT=6380
-REDIS_SSL=false
-REDIS_USERNAME=
-REDIS_PASSWORD=$(generate_password)
-
-# RABBITMQ相关配置
-RABBITMQ_HOST=${HOST_IP}
-RABBITMQ_PORT=5672
-RABBITMQ_SSL=false
-RABBITMQ_USERNAME=rabbit
-RABBITMQ_PASSWORD=$(generate_password)
-
-# MINIO相关配置
-MINIO_SERVER=http://${HOST_IP}:9000
-MINIO_ROOT_USERNAME=minio
-MINIO_ROOT_PASSWORD=$(generate_password)
-
-# GATEWAY相关配置
-GATEWAY_SERVER=http://${HOST_IP}
-
-# MSC账号相关配置
-MSC_ROOT_PASSWORD=$(generate_password)
-MSC_RPC_PASSWORD=$(generate_password)
-MSC_OPS_PASSWORD=$(generate_password)
-MSC_ADMIN_PASSWORD=$(generate_password)
-EOF
-
-    chmod 600 "$CONFIG_FILE"
-    log_ok "配置文件已生成: $CONFIG_FILE"
-}
-
-show_config() {
-    echo ""
-    echo "═══════════════════════════════════════"
-    echo "  配置文件摘要: $CONFIG_FILE"
-    echo "═══════════════════════════════════════"
-    grep -v '^$\|^\#' "$CONFIG_FILE" | column -t -s'='
-    echo "═══════════════════════════════════════"
-    echo ""
-}
-
-# ============================================================
-#  阶段 3: 配置应用
-# ============================================================
-
-apply_config() {
-    if [ ! -f "$CONFIG_FILE" ]; then
-        log_error "配置文件不存在: $CONFIG_FILE"
-        exit 1
-    fi
-
-    log_step "开始替换配置变量..."
-
-    # 逐行读取配置文件，将 initHome/initData 中的 #{KEY} 替换为实际值
-    while IFS='=' read -r key value; do
-        case "$key" in
-            \#*|"") continue ;;
-        esac
-        log_info "替换变量 $key => $value"
-        find "$REPO_DIR" -type f -not -path "*/.git/*" -print0 | xargs -0 sed -i "s|#{${key}}|${value}|g"
-        # 密码变量额外生成 BCRYPT 哈希，用于 Registry htpasswd 等场景
-        if [[ $key == *"_PASSWORD" ]]; then
-            local bcrypt_value
-            bcrypt_value=$(htpasswd -nbBC 10 test "$value" | cut -c 6-)
-            log_info "替换BCRYPT密码变量 ${key}_BCRYPT"
-            find "$REPO_DIR" -type f -not -path "*/.git/*" -print0 | xargs -0 sed -i "s|#{${key}_BCRYPT}|${bcrypt_value}|g"
-        fi
-    done < "$CONFIG_FILE"
-
-    log_ok "配置替换完成"
-}
-
-# ============================================================
-#  Docker + Registry
-# ============================================================
-
-install_docker() {
-    source_config
-    log_step "安装 Docker..."
-
-    # 添加 Docker 官方 GPG key + apt 源
-    install -m 0755 -d /etc/apt/keyrings
-    curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
-    chmod a+r /etc/apt/keyrings/docker.asc
-
-    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian \
-$(. /etc/os-release && echo "$VERSION_CODENAME") stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
-    apt-get update -y
-    apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-
-    # Docker daemon 配置: 日志轮转 + insecure-registries + 数据目录
-    cat > /etc/docker/daemon.json << EOF
-{
-  "live-restore": true,
-  "registry-mirrors": ["https://docker.1panel.live"],
-  "data-root":"/home/docker/lib",
-  "log-driver": "json-file",
-  "log-opts": { "max-size": "100m", "max-file": "3" },
-  "insecure-registries":["${UNIWEB_REGISTRY_SERVER}","127.0.0.1:5000","${REGISTRY_SERVER}"]
-}
-EOF
-
-    cat > /etc/containerd/config.toml << 'EOF'
-disabled_plugins = ["cri"]
-root = "/home/docker/containerd"
-state = "/home/docker/containerd/state"
-EOF
-
-    mkdir -p /home/docker/lib /home/docker/containerd /home/docker/containerd/state
-    systemctl daemon-reload
-    systemctl restart containerd
-    systemctl restart docker
-    log_ok "Docker 安装完成"
-}
-
-install_registry() {
-    source_config
-    log_step "启动 Registry 镜像仓库..."
-    bash "${SCRIPT_DIR}/startRegistry5000.sh"
-
-    log_info "设置 Registry 密码..."
-    mkdir -p /home/registry/auth
-    htpasswd -Bbc /home/registry/auth/htpasswd "$REGISTRY_USERNAME" "$REGISTRY_PASSWORD"
-    docker login --username="$REGISTRY_USERNAME" --password="$REGISTRY_PASSWORD" "$REGISTRY_SERVER"
-    log_ok "Registry 安装完成"
-}
-
-# ============================================================
-#  镜像拉取（按需）
-# ============================================================
-
-pull_selected_images() {
-    local images=()
-
-    for i in "${BASIC_SELECTED[@]}"; do
-        case $i in
-            0) images+=("${REGISTRY_SERVER}/${IMAGE_MYSQL}") ;;
-            1) images+=("${REGISTRY_SERVER}/${IMAGE_REDIS}") ;;
-            2) images+=("${REGISTRY_SERVER}/${IMAGE_RABBITMQ}") ;;
-            3) images+=("${REGISTRY_SERVER}/${IMAGE_ELASTICSEARCH}" "${REGISTRY_SERVER}/${IMAGE_KIBANA}") ;;
-            4) images+=("${REGISTRY_SERVER}/${IMAGE_NACOS}") ;;
-            5) images+=("${REGISTRY_SERVER}/${IMAGE_MINIO}") ;;
-        esac
-    done
-
-    for i in "${UW_SELECTED[@]}"; do
-        case $i in
-            0) images+=("${REGISTRY_SERVER}/${IMAGE_UW_GATEWAY}") ;;
-            1) images+=("${REGISTRY_SERVER}/${IMAGE_UW_AUTH_CENTER}") ;;
-            2) images+=("${REGISTRY_SERVER}/${IMAGE_UW_TASK_CENTER}") ;;
-            3) images+=("${REGISTRY_SERVER}/${IMAGE_UW_OPS_CENTER}") ;;
-            4) images+=("${REGISTRY_SERVER}/${IMAGE_UW_GATEWAY_CENTER}") ;;
-            5) images+=("${REGISTRY_SERVER}/${IMAGE_UW_AI_CENTER}") ;;
-            6) images+=("${REGISTRY_SERVER}/${IMAGE_UW_MYDB_CENTER}") ;;
-            7) images+=("${REGISTRY_SERVER}/${IMAGE_UW_MYDB_PROXY}") ;;
-            8) images+=("${REGISTRY_SERVER}/${IMAGE_UW_TINYURL_CENTER}") ;;
-            9) images+=("${REGISTRY_SERVER}/${IMAGE_UW_NOTIFY_CENTER}") ;;
-        esac
-    done
-
-    for i in "${UI_SELECTED[@]}"; do
-        case $i in
-            0) images+=("${REGISTRY_SERVER}/${IMAGE_ROOT_PC_UI}") ;;
-            1) images+=("${REGISTRY_SERVER}/${IMAGE_OPS_PC_UI}") ;;
-            2) images+=("${REGISTRY_SERVER}/${IMAGE_ADMIN_PC_UI}") ;;
-        esac
-    done
-
-    for i in "${SAAS_SELECTED[@]}"; do
-        case $i in
-            0) images+=("${REGISTRY_SERVER}/${IMAGE_SAAS_BASE_APP}") ;;
-            1) images+=("${REGISTRY_SERVER}/${IMAGE_SAAS_FINANCE_APP}") ;;
-            2) images+=("${REGISTRY_SERVER}/${IMAGE_SAAS_PC_UI}") ;;
-        esac
-    done
-
-    for i in "${DEV_SELECTED[@]}"; do
-        case $i in
-            0) images+=("${REGISTRY_SERVER}/${IMAGE_GITEA}") ;;
-            1) images+=("${REGISTRY_SERVER}/${IMAGE_NEXUS3}") ;;
-            2) images+=("${REGISTRY_SERVER}/${IMAGE_UW_CODE_CENTER}") ;;
-            3) images+=("${REGISTRY_SERVER}/${IMAGE_MIHOMO}") ;;
-        esac
-    done
-
-    if [ ${#images[@]} -gt 0 ]; then
-        log_step "拉取镜像 (${#images[@]} 个)..."
-        for img in "${images[@]}"; do
-            log_info "拉取 ${img}..."
-            docker pull "$img" || log_warn "拉取失败: ${img}，将在启动时重试"
-        done
-        log_ok "镜像拉取完成"
-    fi
-}
-
-# ============================================================
-#  基础服务启动
-# ============================================================
-
-setup_mysql() {
-    source_config
-    log_step "启动 MySQL..."
-    bash "${SCRIPT_DIR}/startMydbMysql3308.sh"
-    log_info "等待 MySQL 就绪..."
-    local retries=0
-    while [ $retries -lt 30 ]; do
-        if docker exec -i uw-mydb-mysql-3308 mysqladmin ping -h 127.0.0.1 -P 3308 -u root -p"${MYSQL_ROOT_PASSWORD}" --silent 2>/dev/null; then
-            log_ok "MySQL 已启动"
-            return
-        fi
-        retries=$((retries + 1))
-        echo "  等待 MySQL... ($retries/30)"
-        sleep 2
-    done
-    log_error "MySQL 等待超时"
-}
-
-setup_redis() {
-    log_step "启动 Redis..."
-    bash "${SCRIPT_DIR}/startRedis6380.sh"
-    log_ok "Redis 已启动"
-}
-
-setup_rabbitmq() {
-    log_step "启动 RabbitMQ..."
-    bash "${SCRIPT_DIR}/startRabbitMQ5672.sh"
-    log_ok "RabbitMQ 已启动"
-}
-
-setup_es() {
-    log_step "初始化 ES 环境..."
-
-    # Elasticsearch 需要的系统参数 (vm.max_map_count / ulimit)
-    cat >> /etc/sysctl.conf <<'EOF'
-vm.max_map_count=262144
-fs.file-max=6815744
-EOF
-    sysctl -p 2>/dev/null | tail -5
-
-    ulimit -n 65535
-    ulimit -u 32768
-    ulimit -l unlimited
-
-    cat >> /etc/security/limits.conf <<'EOF'
-* soft nofile 65535
-* hard nofile 65535
-* soft nproc 32768
-* hard nproc 32768
-* soft memlock unlimited
-* hard memlock unlimited
-EOF
-
-    log_ok "ES 环境参数已设置"
-
-    log_step "启动 Elasticsearch..."
-    bash "${SCRIPT_DIR}/startES9200.sh"
-    log_info "等待 ES 启动..."
-    sleep 30
-
-    # 创建 ES 数据流索引模板 (uw-app-log: 30天 / uw-biz-log: 180天)
-    log_step "初始化 ES 配置（数据流 + Kibana Token）..."
-
-    # 应用日志模板 (30天保留)
-    curl -k -u ${LOG_ES_USERNAME}:${LOG_ES_PASSWORD} -H "Content-Type: application/json" -d '
-{
-  "priority": 9,
-  "template": {
-    "settings": { "index": { "number_of_replicas": "0", "refresh_interval": "10s" } },
-    "mappings": {
-      "dynamic": true, "numeric_detection": false, "date_detection": true,
-      "dynamic_date_formats": ["strict_date_optional_time","yyyy/MM/dd HH:mm:ss Z||yyyy/MM/dd Z"],
-      "_source": { "enabled": true, "includes": [], "excludes": [] },
-      "_routing": { "required": false }, "subobjects": true, "dynamic_templates": []
-    },
-    "lifecycle": { "enabled": true, "data_retention": "30d" }
-  },
-  "index_patterns": ["uw-*","saas-*","*-app","*-center"],
-  "data_stream": { "hidden": false, "allow_custom_routing": false },
-  "composed_of": []
-}
-' -X PUT "${LOG_ES_SERVER}/_index_template/uw-app-log"
-
-    curl -k -u ${LOG_ES_USERNAME}:${LOG_ES_PASSWORD} -H "Content-Type: application/json" -d '
-{
-  "priority": 10,
-  "template": {
-    "settings": { "index": { "number_of_replicas": "0", "refresh_interval": "10s" } },
-    "mappings": {
-      "_source": { "excludes": [], "includes": [], "enabled": true },
-      "_routing": { "required": false }, "dynamic": true, "numeric_detection": false,
-      "date_detection": true,
-      "dynamic_date_formats": ["strict_date_optional_time","yyyy/MM/dd HH:mm:ss Z||yyyy/MM/dd Z"],
-      "subobjects": true, "dynamic_templates": []
-    },
-    "lifecycle": { "enabled": true, "data_retention": "180d" }
-  },
-  "index_patterns": ["*.log"],
-  "data_stream": { "hidden": false, "allow_custom_routing": false }
-}
-' -X PUT "${LOG_ES_SERVER}/_index_template/uw-biz-log"
-
-    # 生成 Kibana Service Account Token 并写入配置
-    ELASTICSEARCH_SERVICE_ACCOUNT_TOKEN=$(docker exec es9200 /usr/share/elasticsearch/bin/elasticsearch-service-tokens create elastic/kibana my-token|awk -F ' = ' '{print $NF}'|sed 's/\r//g')
-    log_info "替换变量ELASTICSEARCH_SERVICE_ACCOUNT_TOKEN=${ELASTICSEARCH_SERVICE_ACCOUNT_TOKEN}"
-    find "/home/kibana5601/config" -type f -exec sed -i "s|#{ELASTICSEARCH_SERVICE_ACCOUNT_TOKEN}|${ELASTICSEARCH_SERVICE_ACCOUNT_TOKEN}|g" {} +
-
-    log_ok "ES 配置初始化完成"
-
-    log_step "启动 Kibana..."
-    bash "${SCRIPT_DIR}/startKibana5601.sh"
-    log_ok "Kibana 已启动"
-}
-
-setup_nacos() {
-    log_step "启动 Nacos..."
-    bash "${SCRIPT_DIR}/startNacos8848.sh"
-    log_ok "Nacos 已启动"
-}
-
-setup_minio() {
-    log_step "启动 MinIO..."
-    bash "${SCRIPT_DIR}/startMinio9000.sh"
-    log_ok "MinIO 已启动"
-}
-
-# ============================================================
-#  数据库导入（基础服务启动后）
-# ============================================================
-
-import_selected_databases() {
-    # 检查 MySQL 容器是否在运行，未运行则跳过
-    if ! docker ps --format '{{.Names}}' | grep -q '^uw-mydb-mysql-3308$'; then
-        log_warn "MySQL 容器未运行，跳过数据库导入"
-        return
-    fi
-
-    local sql_files=()
-
-    # initUser + initNacos 是所有安装的基础，必须导入
-    sql_files+=(initUser.sql initNacos.sql)
-
-    for i in "${UW_SELECTED[@]}"; do
-        case $i in
-            1) sql_files+=(initAuthCenter.sql) ;;
-            2) sql_files+=(initTaskCenter.sql) ;;
-            3) sql_files+=(initOpsCenter.sql) ;;
-            4) sql_files+=(initGatewayCenter.sql) ;;
-            5) sql_files+=(initMydbCenter.sql) ;;
-            6) sql_files+=(initAiCenter.sql) ;;
-            7) sql_files+=(initTinyurlCenter.sql) ;;
-            8) sql_files+=(initNotifyCenter.sql) ;;
-        esac
-    done
-
-    for i in "${SAAS_SELECTED[@]}"; do
-        case $i in
-            0) sql_files+=(initSaasBase.sql) ;;
-            1) sql_files+=(initSaasFinanceApp.sql) ;;
-        esac
-    done
-
-    for i in "${DEV_SELECTED[@]}"; do
-        case $i in
-            2) sql_files+=(initCodeCenter.sql) ;;
-        esac
-    done
-
-    if [ ${#sql_files[@]} -gt 2 ]; then
-        # 去重 (多个组件可能依赖同一个 SQL)
-        local unique_sqls=()
-        for sql in "${sql_files[@]}"; do
-            local found=false
-            for u in "${unique_sqls[@]}"; do
-                [ "$sql" = "$u" ] && found=true && break
-            done
-            [ "$found" = "false" ] && unique_sqls+=("$sql")
-        done
-
-        log_step "导入数据库 (${#unique_sqls[@]} 个)..."
-        bash "${SCRIPT_DIR}/init/initMysqlData.sh" "${unique_sqls[@]}"
-        log_ok "数据库导入完成"
-    fi
-}
-
-# ============================================================
-#  微服务 / UI 启动
-# ============================================================
-
-start_uw_image() {
-    # 从 image:tag 中提取 name 和 version，调用 startApp.sh 启动 Java 微服务
-    local image="$1"
-    local port="$2"
-    local mem_limit="${3:-0}"
-    local name="${image%%:*}"
-    local version="${image#*:}"
-    log_step "启动 ${name}..."
-    bash "${SCRIPT_DIR}/startApp.sh" "$name" "$version" "$port" "$mem_limit"
-    log_ok "${name} 已启动 (${port})"
-}
-
-start_uw_ui_image() {
-    local image="$1"
-    local port="$2"
-    local name="${image%%:*}"
-    local version="${image#*:}"
-    log_step "启动 ${name}..."
-    bash "${SCRIPT_DIR}/startUI.sh" "$name" "$version" "$port"
-    log_ok "${name} 已启动 (${port})"
-}
-
-# ============================================================
-#  开发服务
-# ============================================================
-
-setup_gitea() {
-    log_step "启动 Gitea..."
-    bash "${SCRIPT_DIR}/startGitea.sh"
-    log_ok "Gitea 已启动"
-}
-
-setup_nexus3() {
-    log_step "启动 Nexus3..."
-    bash "${SCRIPT_DIR}/startNexus3.sh"
-    log_ok "Nexus3 已启动"
-}
-
-setup_mihomo() {
-    log_step "启动 Mihomo..."
-    bash "${SCRIPT_DIR}/startMihomo.sh"
-    log_ok "Mihomo 已启动"
-}
-
-init_ops() {
-    log_step "===== OPS 初始化 ====="
-    # 等待网关就绪后安装 ops-agent，使 Master 可通过 OPS 面板管理本机
-    log_info "等待服务就绪，安装 ops-agent..."
-    sleep 60
-    curl -s "${GATEWAY_SERVER}/uw-ops-center/agent/installer/install" | bash
-    log_ok "ops-agent 已安装，OPS 已接管本机"
-}
-
-# ============================================================
-#  从机安装脚本生成 + HTTP 服务
-# ============================================================
-
-generate_slave_installer() {
-    source_config
-    # 生成自包含的从机安装脚本: 内嵌 Master 的 Registry 凭据 + 网关地址
-    local slave_script="${UNIWEB_DIR}/installSlave.sh"
-
-    cat > "$slave_script" << 'SLAVE_EOF'
-#!/bin/bash
-set -e
-
-SLAVE_EOF
-
-    cat >> "$slave_script" << EOF
-REGISTRY_SERVER="${REGISTRY_SERVER}"
-REGISTRY_USERNAME="${REGISTRY_USERNAME}"
-REGISTRY_PASSWORD="${REGISTRY_PASSWORD}"
-GATEWAY_SERVER="${GATEWAY_SERVER}"
-MASTER_IP="${SYSTEM_IP}"
-
-EOF
-
-    cat >> "$slave_script" << 'SLAVE_BODY'
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-CYAN='\033[0;36m'
-NC='\033[0m'
-log_info()  { echo -e "${GREEN}[INFO]${NC} $*"; }
-log_step()  { echo -e "${CYAN}[STEP]${NC} $*"; }
-log_ok()    { echo -e "${CYAN}[OK]${NC} $*"; }
-
-[ "$EUID" -ne 0 ] && { echo "请使用 root 用户运行"; exit 1; }
-
-log_step "安装系统依赖..."
-apt-get update -y
-apt-get install -y ca-certificates curl gnupg
-install -m 0755 -d /etc/apt/keyrings
-curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
-chmod a+r /etc/apt/keyrings/docker.asc
-
-echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian \
-$(. /etc/os-release && echo "$VERSION_CODENAME") stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
-apt-get update -y
-apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-
-cat > /etc/docker/daemon.json << DAEMON_EOF
-{
-  "live-restore": true,
-  "registry-mirrors": ["https://docker.1panel.live"],
-  "data-root":"/home/docker/lib",
-  "insecure-registries":["${REGISTRY_SERVER}","127.0.0.1:5000"]
-}
-DAEMON_EOF
-
-mkdir -p /home/docker/lib
-systemctl restart docker
-
-log_step "登录镜像仓库..."
-docker login --username="${REGISTRY_USERNAME}" --password="${REGISTRY_PASSWORD}" "${REGISTRY_SERVER}"
-
-log_step "安装 ops-agent..."
-sleep 10
-curl -s "${GATEWAY_SERVER}/uw-ops-center/agent/installer/install" | bash
-
-log_ok "从机安装完成！"
-log_info "ops-agent 已启动，Master 可通过 ${GATEWAY_SERVER} 管理本机"
-SLAVE_BODY
-
-    chmod +x "$slave_script"
-    log_ok "从机安装脚本已生成: $slave_script"
-}
-
-setup_slave_server() {
-    source_config
-    local port="${1:-8888}"
-
-    generate_slave_installer
-
-    # 创建极简 HTTP 响应脚本 (systemd socket activation 模式，每个连接一个进程)
-    cat > "${UNIWEB_DIR}/slave-httpd.sh" << 'HTTPD'
-#!/bin/bash
-RESPONSE=$(cat /root/uniweb/installSlave.sh)
-CONTENT_LENGTH=${#RESPONSE}
-cat > /dev/null
-echo -ne "HTTP/1.1 200 OK\r\nContent-Type: text/x-shellscript\r\nContent-Length: ${CONTENT_LENGTH}\r\nConnection: close\r\n\r\n${RESPONSE}"
-HTTPD
-    chmod +x "${UNIWEB_DIR}/slave-httpd.sh"
-
-    cat > /etc/systemd/system/uniweb-slave-server.socket << EOF
-[Unit]
-Description=UniWeb Slave Installer Socket
-
-[Socket]
-ListenStream=${port}
-Accept=yes
-
-[Install]
-WantedBy=sockets.target
-EOF
-
-    cat > /etc/systemd/system/uniweb-slave-server@.service << EOF
-[Unit]
-Description=UniWeb Slave Installer Handler
-
-[Service]
-Type=simple
-ExecStart=${UNIWEB_DIR}/slave-httpd.sh
-StandardInput=socket
-StandardOutput=socket
-EOF
-
-    systemctl stop uniweb-slave-server.socket 2>/dev/null || true
-    systemctl stop uniweb-slave-server.service 2>/dev/null || true
-    systemctl daemon-reload
-    systemctl enable uniweb-slave-server.socket
-    systemctl start uniweb-slave-server.socket
-
-    local master_ip
-    master_ip=$(ip addr show | awk '/inet / && /10\.|192\.168\./ {print $2}' | head -1 | cut -d/ -f1)
-    if [ -z "$master_ip" ]; then
-        master_ip=$(hostname -I | awk '{print $1}')
-    fi
-
-    log_ok "从机安装服务已启动 (端口 ${port})"
-    log_ok "从机安装命令:"
-    echo ""
-    echo -e "  ${CYAN}curl -fsSL http://${master_ip}:${port}/installSlave.sh | bash${NC}"
-    echo ""
-    log_info "管理命令:"
-    echo "  systemctl status uniweb-slave-server.socket"
-    echo "  systemctl stop uniweb-slave-server.socket"
-    echo "  systemctl disable uniweb-slave-server.socket"
-}
-
-# ============================================================
-#  公用方法
-# ============================================================
-
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-CYAN='\033[0;36m'
-NC='\033[0m'
-
-log_info()    { echo -e "${GREEN}[INFO]${NC} $*" | tee -a "$LOG_FILE"; }
-log_warn()    { echo -e "${YELLOW}[WARN]${NC} $*" | tee -a "$LOG_FILE"; }
-log_error()   { echo -e "${RED}[ERROR]${NC} $*" | tee -a "$LOG_FILE"; }
-log_step()    { echo -e "${BLUE}[STEP]${NC} $*" | tee -a "$LOG_FILE"; }
-log_ok()      { echo -e "${CYAN}[OK]${NC} $*" | tee -a "$LOG_FILE"; }
-
-generate_password() {
-    # 生成随机密码 (默认 32 位，字母+数字)
-    openssl rand -base64 50 | tr -dc A-Z-a-z-0-9 | head -c${1:-32}
-}
-
-source_versions() {
-    # 加载镜像版本配置 (优先已安装目录，其次仓库目录)
-    if [ -f "$REGISTRY_FILE" ]; then
-        source "$REGISTRY_FILE"
-    else
-        local repo_versions="${REPO_DIR}/uniweb-registry.config"
-        if [ -f "$repo_versions" ]; then
-            source "$repo_versions"
-        else
-            log_error "uniweb-registry.config 未找到"
-            exit 1
-        fi
-    fi
-}
-
-source_config() {
-    # 加载部署配置并 export 所有变量到环境
-    if [ ! -f "$CONFIG_FILE" ]; then
-        log_error "uniweb-system.config 不存在，请先运行配置生成"
-        exit 1
-    fi
-    while IFS='=' read -r key value; do
-        case "$key" in
-            \#*|"") continue ;;
-        esac
-        export "$key=$value"
-    done < "$CONFIG_FILE"
-}
-
-check_root() {
-    if [ "$EUID" -ne 0 ]; then
-        log_error "请使用 root 用户运行此脚本"
-        exit 1
-    fi
-}
-
-print_banner() {
-    echo -e "${CYAN}"
-    echo "╔══════════════════════════════════════════════╗"
-    echo "║        UniWeb 服务器初始化安装向导             ║"
-    echo "╚══════════════════════════════════════════════╝"
-    echo -e "${NC}"
-}
-
-run_checklist() {
-    local title="$1"
-    local defaults="$2"
-    shift 2
-    local items=("$@")
-    local args=()
-    local idx=0
-    for item in "${items[@]}"; do
-        local state="OFF"
-        for d in $defaults; do
-            if [ "$d" = "$idx" ]; then state="ON"; break; fi
-        done
-        args+=("$item" "" "$state")
-        idx=$((idx + 1))
-    done
-    local result
-    result=$(whiptail --title "$title" --checklist \
-        "用 方向键 移动，空格 选择/取消，回车 确认" \
-        --separate-output \
-        $(( ${#items[@]} + 7 )) 55 ${#items[@]} \
-        "${args[@]}" 3>&1 1>&2 2>&3)
-    SELECTED=()
-    while IFS= read -r line; do
-        [ -n "$line" ] && SELECTED+=("$((line - 1))")
-    done <<< "$result"
-}
