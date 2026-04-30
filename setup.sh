@@ -137,13 +137,12 @@ run_checklist() {
         for d in $defaults; do
             if [ "$d" = "$idx" ]; then state="ON"; break; fi
         done
-        args+=("$item" "" "$state")
+        args+=("$idx" "$item" "$state")
         idx=$((idx + 1))
     done
     local result
     result=$(whiptail --title "$title" --checklist \
         "用 方向键 移动，空格 选择/取消，回车 确认" \
-        --separate-output \
         $(( ${#items[@]} + 7 )) 55 ${#items[@]} \
         "${args[@]}" 3>&1 1>&2 2>&3)
     SELECTED=()
