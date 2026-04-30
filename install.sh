@@ -28,7 +28,7 @@ fi
 
 echo "[INFO] 安装基础依赖..."
 apt-get update -y
-apt-get install -y git curl bash whiptail ncurses-term locales
+apt-get install -y git curl bash whiptail ncurses-term locales ca-certificates gnupg apache2-utils
 locale-gen zh_CN.UTF-8 2>/dev/null || true
 
 export TERM="${TERM:-xterm-256color}"
@@ -43,7 +43,10 @@ echo "[INFO] 使用 GitHub 源: $REPO_URL"
 
 echo "[INFO] 克隆仓库..."
 rm -fr "$INSTALL_DIR"
-git clone -b "$BRANCH" "$REPO_URL" "$INSTALL_DIR"
+git clone -b "$BRANCH" "$REPO_URL" "$INSTALL_DIR" || {
+    echo "[ERROR] 仓库克隆失败，请检查网络连接"
+    exit 1
+}
 
 echo "[INFO] 设置脚本权限..."
 find "$INSTALL_DIR" -type f -name "*.sh" -exec chmod +x {} \;

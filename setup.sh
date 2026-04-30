@@ -80,7 +80,7 @@ run_silent() {
 }
 
 generate_password() {
-    openssl rand -base64 50 | tr -dc A-Z-a-z-0-9 | head -c${1:-32}
+    openssl rand -base64 50 | tr -dc A-Z-a-z-0-9 | head -c "${1:-32}"
 }
 
 source_versions() {
@@ -148,8 +148,20 @@ run_checklist() {
         "${args[@]}" 3>&1 1>&2 2>&3)
     SELECTED=()
     while IFS= read -r line; do
-        [ -n "$line" ] && SELECTED+=("$((line - 1))")
+        [ -n "$line" ] && SELECTED+=("$line")
     done <<< "$result"
+}
+
+_show_selection() {
+    local label="$1" items_var="$2" sel_var="$3"
+    local -n _items_ref="$items_var"
+    local -n _sel_ref="$sel_var"
+    echo "  ${label}:"
+    if [ ${#_sel_ref[@]} -eq 0 ]; then
+        echo "    (无)"
+    else
+        for i in "${_sel_ref[@]}"; do echo "    [*] ${_items_ref[$i]}"; done
+    fi
 }
 
 # ============================================================
@@ -192,7 +204,9 @@ generate_config() {
         unset PS3
     fi
 
-    cat > "$CONFIG_FILE" << EOF
+    local tmp_config
+    tmp_config="$(mktemp)"
+    cat > "$tmp_config" << EOF
 # UniWeb 部署配置文件 [$(date --rfc-3339=seconds)]
 # 系统名称
 SYSTEM_NAME=${SYSTEM_NAME}
@@ -255,7 +269,8 @@ MSC_OPS_PASSWORD=$(generate_password)
 MSC_ADMIN_PASSWORD=$(generate_password)
 EOF
 
-    chmod 600 "$CONFIG_FILE"
+    chmod 600 "$tmp_config"
+    mv -f "$tmp_config" "$CONFIG_FILE"
     log_ok "配置文件已生成: $CONFIG_FILE"
 }
 
@@ -278,6 +293,9 @@ apply_config() {
         log_error "配置文件不存在: $CONFIG_FILE"
         exit 1
     fi
+
+    log_step "恢复原始文件（确保替换基线干净）..."
+    cd "$REPO_DIR" && git checkout -- . 2>/dev/null || true
 
     log_step "开始替换配置变量..."
 
@@ -401,10 +419,46 @@ install_registry() {
 }
 
 # ============================================================
-#  镜像拉取（按需）
+#  Docker 镜像拉取（上游 → 公共回退 → 按需登录）
 # ============================================================
 
-pull_image_to_local() {
+_docker_logged_in=" "
+
+_docker_login() {
+    local server="$1"
+    [[ "$_docker_logged_in" == *" $server "* ]] && return 0
+    log_step "镜像仓库 ${server} 需要认证，请登录"
+    local reg_user reg_pass
+    read -e -p "用户名: " reg_user
+    read -e -s -p "密码: " reg_pass
+    echo ""
+    if [ -z "$reg_user" ] || [ -z "$reg_pass" ]; then
+        log_warn "用户名或密码为空，跳过登录"
+        return 1
+    fi
+    run_log "docker login ${server}" docker login --username="$reg_user" --password="$reg_pass" "$server" || {
+        log_warn "仓库 ${server} 登录失败"
+        return 1
+    }
+    log_ok "仓库 ${server} 登录成功"
+    _docker_logged_in="${_docker_logged_in}${server} "
+    return 0
+}
+
+_docker_pull() {
+    local desc="$1" ref="$2" server="$3"
+    local stderr
+    stderr=$(docker pull "$ref" 2>&1 >/dev/null) && return 0
+    if [ -n "$server" ] && echo "$stderr" | grep -qiE 'unauthorized|authentication required|access denied|401|403|no basic auth credentials'; then
+        log_info "${desc}需要认证，引导登录..."
+        if _docker_login "$server"; then
+            docker pull "$ref" && return 0
+        fi
+    fi
+    return 1
+}
+
+_pull_image_to_local() {
     local image="$1"
     local local_ref="${REGISTRY_SERVER}/${image}"
     local upstream_ref="${UNIWEB_REGISTRY_SERVER}/${image}"
@@ -416,15 +470,16 @@ pull_image_to_local() {
     fi
 
     log_info "拉取 ${image}..."
-    if run_silent "从上游仓库拉取 ${upstream_ref}" docker pull "$upstream_ref"; then
-        run_silent "标记镜像 ${upstream_ref} -> ${local_ref}" docker tag "$upstream_ref" "$local_ref"
+
+    if _docker_pull "上游仓库 " "$upstream_ref" "${UNIWEB_REGISTRY_SERVER}"; then
+        docker tag "$upstream_ref" "$local_ref"
         run_silent "推送到本地仓库 ${local_ref}" docker push "$local_ref"
         return 0
     fi
 
-    log_info "上游仓库拉取失败，尝试公共仓库..."
-    if run_silent "从公共仓库拉取 ${public_ref}" docker pull "$public_ref"; then
-        run_silent "标记镜像 ${public_ref} -> ${local_ref}" docker tag "$public_ref" "$local_ref"
+    log_info "尝试公共仓库..."
+    if _docker_pull "" "$public_ref" "${PUBLIC_REGISTRY_SERVER}"; then
+        docker tag "$public_ref" "$local_ref"
         run_silent "推送到本地仓库 ${local_ref}" docker push "$local_ref"
         return 0
     fi
@@ -490,7 +545,7 @@ pull_selected_images() {
     if [ ${#images[@]} -gt 0 ]; then
         log_step "拉取镜像 (${#images[@]} 个)..."
         for img in "${images[@]}"; do
-            pull_image_to_local "$img"
+            _pull_image_to_local "$img"
         done
         log_ok "镜像拉取完成"
     fi
@@ -522,17 +577,20 @@ setup_mysql() {
     exit 1
 }
 
-setup_redis() {
-    log_step "启动 Redis..."
-    run_log "启动 Redis" bash "${SCRIPT_DIR}/startRedis6380.sh"
-    log_ok "Redis 已启动"
+_start_service() {
+    local name="$1" script="$2"
+    log_step "启动 ${name}..."
+    run_log "启动 ${name}" bash "${SCRIPT_DIR}/${script}" || return 1
+    log_ok "${name} 已启动"
 }
 
-setup_rabbitmq() {
-    log_step "启动 RabbitMQ..."
-    run_log "启动 RabbitMQ" bash "${SCRIPT_DIR}/startRabbitMQ5672.sh"
-    log_ok "RabbitMQ 已启动"
-}
+setup_redis()    { _start_service "Redis"    "startRedis6380.sh"; }
+setup_rabbitmq() { _start_service "RabbitMQ" "startRabbitMQ5672.sh"; }
+setup_nacos()    { _start_service "Nacos"    "startNacos8848.sh"; }
+setup_minio()    { _start_service "MinIO"    "startMinio9000.sh"; }
+setup_gitea()    { _start_service "Gitea"    "startGitea.sh"; }
+setup_nexus3()   { _start_service "Nexus3"   "startNexus3.sh"; }
+setup_mihomo()   { _start_service "Mihomo"   "startMihomo.sh"; }
 
 setup_es() {
     log_step "初始化 ES 环境..."
@@ -642,21 +700,37 @@ EOF
     log_ok "Kibana 已启动"
 }
 
-setup_nacos() {
-    log_step "启动 Nacos..."
-    run_log "启动 Nacos" bash "${SCRIPT_DIR}/startNacos8848.sh"
-    log_ok "Nacos 已启动"
-}
-
-setup_minio() {
-    log_step "启动 MinIO..."
-    run_log "启动 MinIO" bash "${SCRIPT_DIR}/startMinio9000.sh"
-    log_ok "MinIO 已启动"
-}
-
 # ============================================================
 #  数据库导入（基础服务启动后）
 # ============================================================
+
+_get_sql_files() {
+    SQL_FILES=(initUser.sql)
+    for i in "${BASIC_SELECTED[@]}"; do
+        case $i in 4) SQL_FILES+=(initNacos.sql) ;; esac
+    done
+    for i in "${UW_SELECTED[@]}"; do
+        case $i in
+            1) SQL_FILES+=(initAuthCenter.sql) ;;
+            2) SQL_FILES+=(initTaskCenter.sql) ;;
+            3) SQL_FILES+=(initOpsCenter.sql) ;;
+            4) SQL_FILES+=(initGatewayCenter.sql) ;;
+            5) SQL_FILES+=(initMydbCenter.sql) ;;
+            6) SQL_FILES+=(initAiCenter.sql) ;;
+            7) SQL_FILES+=(initTinyurlCenter.sql) ;;
+            8) SQL_FILES+=(initNotifyCenter.sql) ;;
+        esac
+    done
+    for i in "${SAAS_SELECTED[@]}"; do
+        case $i in
+            0) SQL_FILES+=(initSaasBase.sql) ;;
+            1) SQL_FILES+=(initSaasFinance.sql) ;;
+        esac
+    done
+    for i in "${DEV_SELECTED[@]}"; do
+        case $i in 2) SQL_FILES+=(initCodeCenter.sql) ;; esac
+    done
+}
 
 import_selected_databases() {
     if ! docker ps --format '{{.Names}}' | grep -q '^uw-mydb-mysql-3308$'; then
@@ -664,45 +738,11 @@ import_selected_databases() {
         return
     fi
 
-    local sql_files=()
+    _get_sql_files
 
-    sql_files+=(initUser.sql)
-
-    for i in "${BASIC_SELECTED[@]}"; do
-        case $i in
-            4) sql_files+=(initNacos.sql) ;;
-        esac
-    done
-
-    for i in "${UW_SELECTED[@]}"; do
-        case $i in
-            1) sql_files+=(initAuthCenter.sql) ;;
-            2) sql_files+=(initTaskCenter.sql) ;;
-            3) sql_files+=(initOpsCenter.sql) ;;
-            4) sql_files+=(initGatewayCenter.sql) ;;
-            5) sql_files+=(initMydbCenter.sql) ;;
-            6) sql_files+=(initAiCenter.sql) ;;
-            7) sql_files+=(initTinyurlCenter.sql) ;;
-            8) sql_files+=(initNotifyCenter.sql) ;;
-        esac
-    done
-
-    for i in "${SAAS_SELECTED[@]}"; do
-        case $i in
-            0) sql_files+=(initSaasBase.sql) ;;
-            1) sql_files+=(initSaasFinance.sql) ;;
-        esac
-    done
-
-    for i in "${DEV_SELECTED[@]}"; do
-        case $i in
-            2) sql_files+=(initCodeCenter.sql) ;;
-        esac
-    done
-
-    if [ ${#sql_files[@]} -gt 0 ]; then
+    if [ ${#SQL_FILES[@]} -gt 0 ]; then
         local unique_sqls=()
-        for sql in "${sql_files[@]}"; do
+        for sql in "${SQL_FILES[@]}"; do
             local found=false
             for u in "${unique_sqls[@]}"; do
                 [ "$sql" = "$u" ] && found=true && break
@@ -742,34 +782,62 @@ start_uw_ui_image() {
 }
 
 # ============================================================
-#  开发服务
+#  文件分发辅助
 # ============================================================
 
-setup_gitea() {
-    log_step "启动 Gitea..."
-    run_log "启动 Gitea" bash "${SCRIPT_DIR}/startGitea.sh"
-    log_ok "Gitea 已启动"
+_copy_dir_safe() {
+    local src="$1" dest="$2"
+    if [ -d "$dest" ]; then
+        local answer="n"
+        read -e -p "[WARN] ${dest} 已存在，是否覆盖? [y/N]: " answer
+        case "$answer" in
+            y|Y)
+                rm -fr "$dest" || { log_error "删除 ${dest} 失败"; return 1; }
+                cp -r "$src" "$dest"
+                log_ok "已覆盖 ${dest}"
+                ;;
+            *) log_warn "跳过 ${dest}"; return 0 ;;
+        esac
+    fi
+    cp -r "$src" "$dest"
+    log_ok "已复制 ${dest}"
 }
 
-setup_nexus3() {
-    log_step "启动 Nexus3..."
-    run_log "启动 Nexus3" bash "${SCRIPT_DIR}/startNexus3.sh"
-    log_ok "Nexus3 已启动"
+_copy_init_home() {
+    local name="$1"
+    local src="${REPO_DIR}/initHome/${name}"
+    local dest="/home/${name}"
+    if [ ! -d "$src" ]; then
+        log_warn "源目录不存在: ${src}"
+        return 0
+    fi
+    if [ -d "$dest" ]; then
+        local answer="n"
+        read -e -p "[WARN] ${dest} 已存在，是否覆盖? [y/N]: " answer
+        case "$answer" in
+            y|Y)
+                rm -fr "$dest" || { log_error "删除 ${dest} 失败"; return 1; }
+                cp -r "$src" "$dest"
+                log_ok "已覆盖 ${dest}"
+                ;;
+            *) log_warn "跳过 ${dest}" ;;
+        esac
+    else
+        cp -r "$src" "$dest"
+        log_ok "已复制 ${dest}"
+    fi
 }
 
-setup_mihomo() {
-    log_step "启动 Mihomo..."
-    run_log "启动 Mihomo" bash "${SCRIPT_DIR}/startMihomo.sh"
-    log_ok "Mihomo 已启动"
-}
+# ============================================================
+#  开发服务
+# ============================================================
 
 init_ops() {
     log_step "===== OPS 初始化 ====="
     log_info "等待服务就绪，安装 ops-agent..."
     sleep 60
-    local ops_retries=0
+    local ops_retries=0 installer
     while [ $ops_retries -lt 10 ]; do
-        local installer
         installer=$(curl -sf "${GATEWAY_SERVER}/uw-ops-center/agent/installer/install" 2>/dev/null) && break
         ops_retries=$((ops_retries + 1))
         log_warn "ops-agent 安装脚本获取失败，重试 ($ops_retries/10)..."
@@ -910,7 +978,7 @@ log_ok "从机安装完成！"
 log_info "ops-agent 已启动，Master 可通过 ${GATEWAY_SERVER} 管理本机"
 SLAVE_BODY
 
-    chmod +x "$slave_script"
+    chmod 700 "$slave_script"
     log_ok "从机安装脚本已生成: $slave_script"
 }
 
@@ -927,7 +995,7 @@ CONTENT_LENGTH=${#RESPONSE}
 cat > /dev/null
 echo -ne "HTTP/1.1 200 OK\r\nContent-Type: text/x-shellscript\r\nContent-Length: ${CONTENT_LENGTH}\r\nConnection: close\r\n\r\n${RESPONSE}"
 HTTPD
-    chmod +x "${UNIWEB_DIR}/slave-httpd.sh"
+    chmod 700 "${UNIWEB_DIR}/slave-httpd.sh"
 
     cat > /etc/systemd/system/uniweb-slave-server.socket << EOF
 [Unit]
@@ -974,6 +1042,7 @@ EOF
     echo "  systemctl stop uniweb-slave-server.socket"
     echo "  systemctl disable uniweb-slave-server.socket"
 }
+
 
 # ============================================================
 #  主流程入口
@@ -1041,25 +1110,15 @@ echo -e "${CYAN}═════════════════════�
 echo ""
 echo "  将自动安装: Docker + Registry"
 echo ""
-echo "  基础服务:"
-for i in "${BASIC_SELECTED[@]}"; do echo "    [*] ${BASIC_ITEMS[$i]}"; done
-[ ${#BASIC_SELECTED[@]} -eq 0 ] && echo "    (无)"
+_show_selection "基础服务"      BASIC_ITEMS BASIC_SELECTED
 echo ""
-echo "  UniWeb 微服务:"
-for i in "${UW_SELECTED[@]}"; do echo "    [*] ${UW_ITEMS[$i]}"; done
-[ ${#UW_SELECTED[@]} -eq 0 ] && echo "    (无)"
+_show_selection "UniWeb 微服务" UW_ITEMS    UW_SELECTED
 echo ""
-echo "  UniWeb 前端服务:"
-for i in "${UI_SELECTED[@]}"; do echo "    [*] ${UI_ITEMS[$i]}"; done
-[ ${#UI_SELECTED[@]} -eq 0 ] && echo "    (无)"
+_show_selection "UniWeb 前端"   UI_ITEMS    UI_SELECTED
 echo ""
-echo "  SaaS 服务:"
-for i in "${SAAS_SELECTED[@]}"; do echo "    [*] ${SAAS_ITEMS[$i]}"; done
-[ ${#SAAS_SELECTED[@]} -eq 0 ] && echo "    (无)"
+_show_selection "SaaS 服务"     SAAS_ITEMS  SAAS_SELECTED
 echo ""
-echo "  开发服务:"
-for i in "${DEV_SELECTED[@]}"; do echo "    [*] ${DEV_ITEMS[$i]}"; done
-[ ${#DEV_SELECTED[@]} -eq 0 ] && echo "    (无)"
+_show_selection "开发服务"      DEV_ITEMS   DEV_SELECTED
 echo ""
 
 read -e -p "确认开始安装? [Y/n]: " CONFIRM
@@ -1071,11 +1130,9 @@ esac
 
 # --- 阶段 5: 按需分发文件 (仅复制选中组件对应的 initHome/initData) ---
 log_step "===== 阶段 5: 按需分发文件 ====="
-mkdir -p "${UNIWEB_DIR}"
 
 log_info "复制 script -> ${UNIWEB_DIR}/script/"
-rm -fr "${UNIWEB_DIR}/script"
-cp -r "${REPO_DIR}/script" "${UNIWEB_DIR}/script"
+_copy_dir_safe "${REPO_DIR}/script" "${UNIWEB_DIR}/script"
 
 log_info "复制 uniweb-registry.config -> ${UNIWEB_DIR}/uniweb-registry.config"
 cp "${REPO_DIR}/uniweb-registry.config" "${UNIWEB_DIR}/uniweb-registry.config"
@@ -1083,65 +1140,30 @@ chmod 600 "${UNIWEB_DIR}/uniweb-registry.config"
 
 for i in "${BASIC_SELECTED[@]}"; do
     case $i in
-        0) log_info "复制 initHome/mysql3308 -> /home/mysql3308/"; cp -rn "${REPO_DIR}/initHome/mysql3308" /home/ 2>/dev/null || true ;;
-        1) log_info "复制 initHome/redis6380 -> /home/redis6380/"; cp -rn "${REPO_DIR}/initHome/redis6380" /home/ 2>/dev/null || true ;;
-        2) log_info "复制 initHome/rabbitmq5672 -> /home/rabbitmq5672/"; cp -rn "${REPO_DIR}/initHome/rabbitmq5672" /home/ 2>/dev/null || true ;;
-        3)
-            log_info "复制 initHome/es9200 -> /home/es9200/"; cp -rn "${REPO_DIR}/initHome/es9200" /home/ 2>/dev/null || true
-            log_info "复制 initHome/kibana5601 -> /home/kibana5601/"; cp -rn "${REPO_DIR}/initHome/kibana5601" /home/ 2>/dev/null || true
-            ;;
-        4) log_info "复制 initHome/nacos8848 -> /home/nacos8848/"; cp -rn "${REPO_DIR}/initHome/nacos8848" /home/ 2>/dev/null || true ;;
+        0) _copy_init_home "mysql3308" ;;
+        1) _copy_init_home "redis6380" ;;
+        2) _copy_init_home "rabbitmq5672" ;;
+        3) _copy_init_home "es9200"; _copy_init_home "kibana5601" ;;
+        4) _copy_init_home "nacos8848" ;;
+        5) _copy_init_home "minio9000" ;;
     esac
 done
 
-log_info "复制 initHome/registry -> /home/registry/"; cp -rn "${REPO_DIR}/initHome/registry" /home/ 2>/dev/null || true
+_copy_init_home "registry"
 
 for i in "${DEV_SELECTED[@]}"; do
     case $i in
-        0) log_info "复制 initHome/gitea -> /home/gitea/"; cp -rn "${REPO_DIR}/initHome/gitea" /home/ 2>/dev/null || true ;;
-        3) log_info "复制 initHome/mihomo -> /home/mihomo/"; cp -rn "${REPO_DIR}/initHome/mihomo" /home/ 2>/dev/null || true ;;
+        0) _copy_init_home "gitea" ;;
+        3) _copy_init_home "mihomo" ;;
     esac
 done
 
 SQL_NEEDED=false
 for i in "${BASIC_SELECTED[@]}"; do [ "$i" = "0" ] && SQL_NEEDED=true; done
 if [ "$SQL_NEEDED" = "true" ]; then
-    sql_files=(initUser.sql)
-
-    for i in "${BASIC_SELECTED[@]}"; do
-        case $i in
-            4) sql_files+=(initNacos.sql) ;;
-        esac
-    done
-
-    for i in "${UW_SELECTED[@]}"; do
-        case $i in
-            1) sql_files+=(initAuthCenter.sql) ;;
-            2) sql_files+=(initTaskCenter.sql) ;;
-            3) sql_files+=(initOpsCenter.sql) ;;
-            4) sql_files+=(initGatewayCenter.sql) ;;
-            5) sql_files+=(initMydbCenter.sql) ;;
-            6) sql_files+=(initAiCenter.sql) ;;
-            7) sql_files+=(initTinyurlCenter.sql) ;;
-            8) sql_files+=(initNotifyCenter.sql) ;;
-        esac
-    done
-
-    for i in "${SAAS_SELECTED[@]}"; do
-        case $i in
-            0) sql_files+=(initSaasBase.sql) ;;
-            1) sql_files+=(initSaasFinance.sql) ;;
-        esac
-    done
-
-    for i in "${DEV_SELECTED[@]}"; do
-        case $i in
-            2) sql_files+=(initCodeCenter.sql) ;;
-        esac
-    done
-
+    _get_sql_files
     mkdir -p "${UNIWEB_DIR}/initData"
-    for sql in "${sql_files[@]}"; do
+    for sql in "${SQL_FILES[@]}"; do
         if [ -f "${REPO_DIR}/initData/${sql}" ]; then
             log_info "复制 initData/${sql}"
             cp "${REPO_DIR}/initData/${sql}" "${UNIWEB_DIR}/initData/${sql}"
