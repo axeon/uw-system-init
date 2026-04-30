@@ -31,7 +31,7 @@ echo "[INFO] 安装基础依赖..."
 apt-get update -y
 apt-get install -y git curl bash
 
-INSTALL_DIR="/root/.uw-system-init-$(date +%s)"
+INSTALL_DIR="/root/.uw-system-init-$(date +%y%m%d%H%M%S)"
 
 REPO_URL="https://github.com/axeon/uw-system-init.git"
 echo "[INFO] 使用 GitHub 源: $REPO_URL"
