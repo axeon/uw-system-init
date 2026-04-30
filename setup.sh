@@ -124,7 +124,10 @@ run_checklist() {
 install_system_deps() {
     log_step "安装系统依赖..."
     apt-get update -y
-    apt-get install -y ca-certificates curl gnupg apache2-utils whiptail
+    apt-get install -y ca-certificates curl gnupg apache2-utils whiptail locales
+    locale-gen zh_CN.UTF-8 2>/dev/null || true
+    export LANG=zh_CN.UTF-8
+    export LC_ALL=zh_CN.UTF-8
     log_ok "系统依赖安装完成"
 }
 

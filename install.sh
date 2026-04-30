@@ -45,10 +45,10 @@ find "$INSTALL_DIR" -type f -name "*.sh" -exec chmod +x {} \;
 
 echo "[INFO] 启动安装向导..."
 cd "$INSTALL_DIR"
-bash setup.sh
+bash setup.sh < /dev/tty
 
 echo ""
-read -p "安装完成，是否删除临时克隆目录 $INSTALL_DIR? [Y/n]: " CLEANUP
+read -p "安装完成，是否删除临时克隆目录 $INSTALL_DIR? [Y/n]: " CLEANUP < /dev/tty
 case "$CLEANUP" in
     n|N) echo "[INFO] 临时目录保留: $INSTALL_DIR" ;;
     *)   rm -fr "$INSTALL_DIR"; echo "[INFO] 临时目录已清理" ;;
