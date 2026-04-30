@@ -1,11 +1,11 @@
 #!/bin/bash
 set -e
 
-# 用法: ./proxyUpdate.sh "订阅链接"
-# 示例: ./proxyUpdate.sh "https://example.com/sub?token=xxx"
+# 用法: ./proxyConfig.sh "订阅链接"
+# 示例: ./proxyConfig.sh "https://example.com/sub?token=xxx"
 
 SUB_URL="${1:-}"
-CONFIG_DIR="$HOME/mihomo/conf"
+CONFIG_DIR="/etc/mihomo"
 CONFIG_FILE="$CONFIG_DIR/config.yaml"
 BACKUP_FILE="$CONFIG_FILE.bak.$(date +%Y%m%d_%H%M%S)"
 
@@ -28,9 +28,8 @@ curl -L -s --max-time 30 -o "${CONFIG_FILE}.tmp" "$SUB_URL"
 if grep -qE "proxy|proxies" "${CONFIG_FILE}.tmp" 2>/dev/null; then
    mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
    echo "$(date '+%Y-%m-%d %H:%M:%S'): 订阅更新成功"
-
    # 重启容器生效
-   docker restart mihomo
+   systemctl restart mihomo
 else
    rm -f "${CONFIG_FILE}.tmp"
    echo "$(date '+%Y-%m-%d %H:%M:%S'): 订阅验证失败，保留旧配置"

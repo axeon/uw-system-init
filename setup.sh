@@ -1109,7 +1109,7 @@ BASIC_ITEMS=("MySQL 数据库" "Redis 缓存服务" "RabbitMQ 队列服务" "ES+
 UW_ITEMS=("uw-gateway 网关服务" "uw-auth-center 鉴权中心" "uw-task-center 任务中心" "uw-ops-center 运维中心" "uw-gateway-center 网关中心" "uw-mydb-center 数据中心" "uw-ai-center AI中心" "uw-mydb-proxy 数据代理" "uw-tinyurl-center 短链中心" "uw-notify-center 通知中心")
 UI_ITEMS=("root-pc-ui 系统管理" "ops-pc-ui 运维管理" "admin-pc-ui 平台管理")
 SAAS_ITEMS=("saas-base 基础服务" "saas-finance 财务服务" "saas-pc-ui SaaS管理端")
-DEV_ITEMS=("Gitea Git服务" "Nexus3 构件服务" "uw-code-center 代码中心" "Mihomo 代理服务")
+DEV_ITEMS=("Gitea Git服务" "Nexus3 构件服务" "uw-code-center 代码中心")
 
 BASIC_SELECTED=()
 UW_SELECTED=()
