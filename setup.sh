@@ -143,6 +143,7 @@ run_checklist() {
     local result
     result=$(whiptail --title "$title" --checklist \
         "用 方向键 移动，空格 选择/取消，回车 确认" \
+        --separate-output \
         $(( ${#items[@]} + 7 )) 55 ${#items[@]} \
         "${args[@]}" 3>&1 1>&2 2>&3)
     SELECTED=()
@@ -306,14 +307,56 @@ install_docker() {
     source_versions
     log_step "安装 Docker..."
 
+    if command -v docker &>/dev/null && docker info &>/dev/null; then
+        log_ok "Docker 已安装，跳过"
+        return 0
+    fi
+
     install -m 0755 -d /etc/apt/keyrings
-    run_log "下载 Docker GPG key" curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
+
+    local gpg_ok=false
+    local gpg_urls=(
+        "https://download.docker.com/linux/debian/gpg"
+        "https://mirrors.aliyun.com/docker-ce/linux/debian/gpg"
+    )
+    for url in "${gpg_urls[@]}"; do
+        log_info "尝试下载 Docker GPG key: $url"
+        for retry in 1 2 3; do
+            if curl -fsSL --connect-timeout 10 "$url" -o /etc/apt/keyrings/docker.asc; then
+                gpg_ok=true
+                break 2
+            fi
+            log_warn "下载失败，重试 ($retry/3)..."
+            sleep 3
+        done
+    done
+    if [ "$gpg_ok" = "false" ]; then
+        log_error "Docker GPG key 下载失败，请检查网络连接"
+        exit 1
+    fi
     chmod a+r /etc/apt/keyrings/docker.asc
 
+    local codename
+    codename=$(. /etc/os-release && echo "$VERSION_CODENAME")
     echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian \
-$(. /etc/os-release && echo "$VERSION_CODENAME") stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
-    run_log "apt-get update (docker)" apt-get update -y
-    run_log "apt-get install docker" apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+${codename} stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+    if ! run_log "apt-get update (docker)" apt-get update -y; then
+        log_warn "Docker 官方源更新失败，尝试阿里云镜像源"
+        echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://mirrors.aliyun.com/docker-ce/linux/debian \
+${codename} stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+        run_log "apt-get update (aliyun docker)" apt-get update -y || {
+            log_error "Docker 源更新失败，请检查网络连接"
+            exit 1
+        }
+    fi
+
+    run_log "apt-get install docker" apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin || {
+        log_error "Docker 安装失败"
+        exit 1
+    }
+
+    mkdir -p /etc/docker /etc/containerd
 
     cat > /etc/docker/daemon.json << EOF
 {
@@ -342,12 +385,18 @@ EOF
 install_registry() {
     source_config
     log_step "启动 Registry 镜像仓库..."
-    run_log "startRegistry5000" bash "${SCRIPT_DIR}/startRegistry5000.sh"
+    run_log "startRegistry5000" bash "${SCRIPT_DIR}/startRegistry5000.sh" || {
+        log_error "Registry 启动失败"
+        exit 1
+    }
 
     log_info "设置 Registry 密码..."
     mkdir -p /home/registry/auth
     run_log "htpasswd" htpasswd -Bbc /home/registry/auth/htpasswd "$REGISTRY_USERNAME" "$REGISTRY_PASSWORD"
-    run_log "docker login" docker login --username="$REGISTRY_USERNAME" --password="$REGISTRY_PASSWORD" "$REGISTRY_SERVER"
+    run_log "docker login" docker login --username="$REGISTRY_USERNAME" --password="$REGISTRY_PASSWORD" "$REGISTRY_SERVER" || {
+        log_error "docker login 失败"
+        exit 1
+    }
     log_ok "Registry 安装完成"
 }
 
@@ -425,7 +474,10 @@ pull_selected_images() {
 setup_mysql() {
     source_config
     log_step "启动 MySQL..."
-    run_log "启动 MySQL" bash "${SCRIPT_DIR}/startMydbMysql3308.sh"
+    run_log "启动 MySQL" bash "${SCRIPT_DIR}/startMydbMysql3308.sh" || {
+        log_error "MySQL 容器启动脚本失败"
+        exit 1
+    }
     log_info "等待 MySQL 就绪..."
     local retries=0
     while [ $retries -lt 30 ]; do
@@ -727,28 +779,62 @@ NC='\033[0m'
 log_info()  { echo -e "${GREEN}[INFO]${NC} $*"; }
 log_step()  { echo -e "${CYAN}[STEP]${NC} $*"; }
 log_ok()    { echo -e "${CYAN}[OK]${NC} $*"; }
+log_warn()  { echo -e "\033[1;33m[WARN]${NC} $*"; }
+log_error() { echo -e "${RED}[ERROR]${NC} $*"; }
 
 [ "$EUID" -ne 0 ] && { echo "请使用 root 用户运行"; exit 1; }
 
-log_step "安装系统依赖..."
-apt-get update -y
-apt-get install -y ca-certificates curl gnupg
-install -m 0755 -d /etc/apt/keyrings
-curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
-chmod a+r /etc/apt/keyrings/docker.asc
+if command -v docker &>/dev/null && docker info &>/dev/null; then
+    log_ok "Docker 已安装，跳过"
+else
+    log_step "安装系统依赖..."
+    apt-get update -y
+    apt-get install -y ca-certificates curl gnupg
+    install -m 0755 -d /etc/apt/keyrings
 
-echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian \
-$(. /etc/os-release && echo "$VERSION_CODENAME") stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
-apt-get update -y
-apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+    GPG_OK=false
+    for url in "https://download.docker.com/linux/debian/gpg" "https://mirrors.aliyun.com/docker-ce/linux/debian/gpg"; do
+        log_info "尝试下载 Docker GPG key: $url"
+        for retry in 1 2 3; do
+            if curl -fsSL --connect-timeout 10 "$url" -o /etc/apt/keyrings/docker.asc; then
+                GPG_OK=true
+                break 2
+            fi
+            log_warn "下载失败，重试 ($retry/3)..."
+            sleep 3
+        done
+    done
+    if [ "$GPG_OK" = "false" ]; then
+        log_error "Docker GPG key 下载失败，请检查网络连接"
+        exit 1
+    fi
+    chmod a+r /etc/apt/keyrings/docker.asc
 
-cat > /etc/containerd/config.toml << 'DAEMON_CTR'
+    CODENAME=$(. /etc/os-release && echo "$VERSION_CODENAME")
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian \
+${CODENAME} stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+    if ! apt-get update -y; then
+        log_warn "Docker 官方源更新失败，尝试阿里云镜像源"
+        echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://mirrors.aliyun.com/docker-ce/linux/debian \
+${CODENAME} stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+        apt-get update -y || { log_error "Docker 源更新失败"; exit 1; }
+    fi
+
+    apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin || {
+        log_error "Docker 安装失败"
+        exit 1
+    }
+
+    mkdir -p /etc/docker /etc/containerd
+
+    cat > /etc/containerd/config.toml << 'DAEMON_CTR'
 disabled_plugins = ["cri"]
 root = "/home/docker/containerd"
 state = "/home/docker/containerd/state"
 DAEMON_CTR
 
-cat > /etc/docker/daemon.json << DAEMON_EOF
+    cat > /etc/docker/daemon.json << DAEMON_EOF
 {
   "live-restore": true,
   "registry-mirrors": ["https://docker.1panel.live"],
@@ -757,13 +843,17 @@ cat > /etc/docker/daemon.json << DAEMON_EOF
 }
 DAEMON_EOF
 
-mkdir -p /home/docker/lib /home/docker/containerd /home/docker/containerd/state
-systemctl daemon-reload
-systemctl restart containerd
-systemctl restart docker
+    mkdir -p /home/docker/lib /home/docker/containerd /home/docker/containerd/state
+    systemctl daemon-reload
+    systemctl restart containerd
+    systemctl restart docker
+fi
 
 log_step "登录镜像仓库..."
-docker login --username="${REGISTRY_USERNAME}" --password="${REGISTRY_PASSWORD}" "${REGISTRY_SERVER}"
+docker login --username="${REGISTRY_USERNAME}" --password="${REGISTRY_PASSWORD}" "${REGISTRY_SERVER}" || {
+    log_error "docker login 失败"
+    exit 1
+}
 
 log_step "安装 ops-agent..."
 sleep 10
