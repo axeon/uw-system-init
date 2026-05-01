@@ -34,7 +34,7 @@ _mysql_exec() {
     MYSQL_PWD="${MYSQL_ROOT_PASSWORD}" docker exec -i -e MYSQL_PWD "$MYSQL_CONTAINER" mysql \
         -h "${MYSQL_HOST}" -P "${MYSQL_PORT}" \
         -u "${MYSQL_ROOT_USERNAME}" \
-        "$@" 2>/dev/null
+        "$@"
 }
 
 _resolve_sql_path() {
@@ -68,7 +68,11 @@ _db_exists() {
     local db_name="$1"
     [ -z "$db_name" ] && return 1
     local result
-    result=$(_mysql_exec -sN -e "SELECT SCHEMA_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME='${db_name}'")
+    result=$(_mysql_exec -sN -e "SELECT SCHEMA_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME='${db_name}'" 2>/dev/null)
+    if [ $? -ne 0 ]; then
+        echo "[ERROR] MySQL 查询失败，无法判断数据库 ${db_name} 是否存在" >&2
+        return 2
+    fi
     [ -n "$result" ]
 }
 
@@ -111,18 +115,26 @@ import_sql() {
     local db_name
     db_name=$(_extract_db_name "$sql_file")
 
-    if [ -n "$db_name" ] && _db_exists "$db_name"; then
-        if _has_drop "$sql_file"; then
-            echo "[WARN] ${sql_file}: 数据库 ${db_name} 已存在，且 SQL 中包含 DROP 语句"
-            local answer="n"
-            read -e -p "  是否仍然执行? [y/N]: " answer
-            case "$answer" in
-                y|Y) ;;
-                *)   echo "[WARN] 跳过 ${sql_file}"; return 0 ;;
-            esac
-        else
-            echo "[WARN] ${sql_file}: 数据库 ${db_name} 已存在，跳过"
-            return 0
+    if [ -n "$db_name" ]; then
+        local db_rc
+        _db_exists "$db_name"
+        db_rc=$?
+        if [ $db_rc -eq 2 ]; then
+            return 1
+        fi
+        if [ $db_rc -eq 0 ]; then
+            if _has_drop "$sql_file"; then
+                echo "[WARN] ${sql_file}: 数据库 ${db_name} 已存在，且 SQL 中包含 DROP 语句"
+                local answer="n"
+                read -e -p "  是否仍然执行? [y/N]: " answer
+                case "$answer" in
+                    y|Y) ;;
+                    *)   echo "[WARN] 跳过 ${sql_file}"; return 0 ;;
+                esac
+            else
+                echo "[WARN] ${sql_file}: 数据库 ${db_name} 已存在，跳过"
+                return 0
+            fi
         fi
     fi
 

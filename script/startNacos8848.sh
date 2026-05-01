@@ -8,11 +8,12 @@ create_dir /home/nacos8848/conf
 docker_remove nacos8848
 
 CID=$(docker run -d \
+-m 1g \
 -e "MODE=standalone" \
 -v /home/nacos8848/logs:/home/nacos/logs \
 -v /home/nacos8848/conf/application.properties:/home/nacos/conf/application.properties \
 ${DOCKER_COMMON_OPTS} \
---cpus=2 \
+--cpus=1 \
 --name=nacos8848 \
 "${REGISTRY_SERVER}/${IMAGE_NACOS}")
 
