@@ -5,9 +5,18 @@
 
 source /root/uniweb/uniweb-system.config 2>/dev/null || exit 1
 
-cat > /dev/null
+while IFS=$'\r\n' read -r line; do
+    [ "$line" = "" ] && break
+done
 
-RESPONSE=$(cat << SLAVEEOF
+cat << 'HEADER'
+HTTP/1.1 200 OK
+Content-Type: text/x-shellscript
+Connection: close
+
+HEADER
+
+cat << SLAVEEOF
 #!/bin/bash
 REGISTRY_SERVER="${REGISTRY_SERVER}"
 REGISTRY_USERNAME="${REGISTRY_USERNAME}"
@@ -118,7 +127,3 @@ fi
 log_ok "从机安装完成！"
 log_info "ops-agent 已启动，Master 可通过 \${GATEWAY_SERVER} 管理本机"
 SLAVEEOF
-)
-
-CONTENT_LENGTH=${#RESPONSE}
-echo -ne "HTTP/1.1 200 OK\r\nContent-Type: text/x-shellscript\r\nContent-Length: ${CONTENT_LENGTH}\r\nConnection: close\r\n\r\n${RESPONSE}"
