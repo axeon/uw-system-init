@@ -14,7 +14,7 @@ CID=$(docker run -d \
 --ulimit nofile=65535:65535 \
 --ulimit nproc=32768:32768 \
 --ulimit memlock=-1:-1 \
--e "ES_JAVA_OPTS=-Xms256m -Xmx2048m" \
+-e "ES_JAVA_OPTS=-Xms1g -Xmx1g" \
 -e "ELASTIC_PASSWORD=${LOG_ES_PASSWORD}" \
 -v /home/es9200/config:/usr/share/elasticsearch/config \
 -v /home/es9200/data:/usr/share/elasticsearch/data \
