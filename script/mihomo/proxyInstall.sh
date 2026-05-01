@@ -39,15 +39,17 @@ TMP_DIR=$(mktemp -d)
 trap 'rm -fr "$TMP_DIR" 2>/dev/null' EXIT
 
 echo "[INFO] 下载 ${DEB_NAME}..."
+DOWNLOAD_OK=false
 for retry in 1 2 3; do
     if curl -fSL --connect-timeout 15 -o "${TMP_DIR}/${DEB_NAME}" "$DOWNLOAD_URL"; then
+        DOWNLOAD_OK=true
         break
     fi
     echo "[WARN] 下载失败，重试 ($retry/3)..."
     sleep 3
 done
 
-if [ ! -f "${TMP_DIR}/${DEB_NAME}" ]; then
+if [ "$DOWNLOAD_OK" = "false" ]; then
     echo "[ERROR] 下载失败: ${DEB_NAME}"
     exit 1
 fi

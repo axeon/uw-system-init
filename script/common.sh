@@ -62,6 +62,5 @@ docker_run_check() {
 
 # Docker 通用启动参数: 时区 + host 网络 + 自动重启
 TZ_NAME=$(cat /etc/timezone 2>/dev/null || echo "UTC")
-if [ -d /etc/timezone ]; then rm -fr /etc/timezone; fi
 [ ! -f /etc/timezone ] && echo "$TZ_NAME" > /etc/timezone
 DOCKER_COMMON_OPTS="-e TZ=${TZ_NAME} -v /etc/localtime:/etc/localtime:ro -v /etc/timezone:/etc/timezone:ro --network=host --restart=unless-stopped"

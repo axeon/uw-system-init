@@ -560,7 +560,6 @@ pull_selected_images() {
             0) images+=("${IMAGE_GITEA}") ;;
             1) images+=("${IMAGE_NEXUS3}") ;;
             2) images+=("${IMAGE_UW_CODE_CENTER}") ;;
-            3) images+=("${IMAGE_MIHOMO}") ;;
         esac
     done
 
@@ -616,7 +615,6 @@ setup_nacos() {
 setup_minio()    { _start_service "MinIO"    "startMinio9000.sh"; }
 setup_gitea()    { _start_service "Gitea"    "startGitea.sh"; }
 setup_nexus3()   { _start_service "Nexus3"   "startNexus3.sh"; }
-setup_mihomo()   { _start_service "Mihomo"   "startMihomo.sh"; }
 
 setup_es() {
     log_step "初始化 ES 环境..."
@@ -1035,7 +1033,6 @@ _copy_init_home "registry"
 for i in "${DEV_SELECTED[@]}"; do
     case $i in
         0) _copy_init_home "gitea" ;;
-        3) _copy_init_home "mihomo" ;;
     esac
 done
 
@@ -1123,7 +1120,6 @@ for i in "${DEV_SELECTED[@]}"; do
         0) setup_gitea ;;
         1) setup_nexus3 ;;
         2) start_uw_image "${IMAGE_UW_CODE_CENTER}" 10050; sleep 20 ;;
-        3) setup_mihomo ;;
     esac
 done
 

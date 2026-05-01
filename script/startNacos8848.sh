@@ -11,7 +11,7 @@ CID=$(docker run -d \
 -m 1g \
 -e "MODE=standalone" \
 -v /home/nacos8848/logs:/home/nacos/logs \
--v /home/nacos8848/conf/application.properties:/home/nacos/conf/application.properties \
+-v /home/nacos8848/conf:/home/nacos/conf \
 ${DOCKER_COMMON_OPTS} \
 --cpus=1 \
 --name=nacos8848 \
