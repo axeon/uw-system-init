@@ -649,7 +649,7 @@ EOF
     log_step "启动 Elasticsearch..."
     run_log "启动 ES" bash "${SCRIPT_DIR}/startES9200.sh" || {
         log_error "ES 容器启动失败"
-        exit 1
+        return 1
     }
     log_info "等待 ES 就绪..."
     local es_retries=0
@@ -664,7 +664,7 @@ EOF
     done
     if [ $es_retries -ge 30 ]; then
         log_error "ES 等待超时"
-        exit 1
+        return 1
     fi
 
     log_step "初始化 ES 配置（数据流 + Kibana Token）..."
@@ -864,8 +864,8 @@ _copy_init_home() {
 init_ops() {
     log_step "===== OPS 初始化 ====="
     run_log "安装 ops-agent" bash "${SCRIPT_DIR}/init/initOpsAgent.sh" || {
-        log_error "ops-agent 安装失败, 请手动执行 ${SCRIPT_DIR}/init/initOpsAgent.sh"
-        exit 1
+        log_warn "ops-agent 安装失败, 请手动执行 ${SCRIPT_DIR}/init/initOpsAgent.sh"
+        return 1
     }
     log_ok "OPS 已接管本机"
 }
@@ -874,151 +874,19 @@ init_ops() {
 #  从机安装脚本生成 + HTTP 服务
 # ============================================================
 
-generate_slave_installer() {
+setup_slave_service() {
     source_config
-    local slave_script="${UNIWEB_DIR}/installSlave.sh"
+    local port="${1:-900}"
+    local service_script="${SCRIPT_DIR}/slave/slaveService.sh"
 
-    cat > "$slave_script" << 'SLAVE_EOF'
-#!/bin/bash
-set -e
-
-SLAVE_EOF
-
-    cat >> "$slave_script" << EOF
-REGISTRY_SERVER="${REGISTRY_SERVER}"
-REGISTRY_USERNAME="${REGISTRY_USERNAME}"
-REGISTRY_PASSWORD="${REGISTRY_PASSWORD}"
-GATEWAY_SERVER="${GATEWAY_SERVER}"
-MASTER_IP="${SYSTEM_IP}"
-
-EOF
-
-    cat >> "$slave_script" << 'SLAVE_BODY'
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-CYAN='\033[0;36m'
-NC='\033[0m'
-log_info()  { echo -e "${GREEN}[INFO]${NC} $*"; }
-log_step()  { echo -e "${CYAN}[STEP]${NC} $*"; }
-log_ok()    { echo -e "${CYAN}[OK]${NC} $*"; }
-log_warn()  { echo -e "\033[1;33m[WARN]${NC} $*"; }
-log_error() { echo -e "${RED}[ERROR]${NC} $*"; }
-
-[ "$EUID" -ne 0 ] && { echo "请使用 root 用户运行"; exit 1; }
-
-if command -v docker &>/dev/null && docker info &>/dev/null; then
-    log_ok "Docker 已安装，跳过"
-else
-    log_step "安装系统依赖..."
-    apt-get update -y
-    apt-get install -y ca-certificates curl gnupg
-    install -m 0755 -d /etc/apt/keyrings
-
-    GPG_OK=false
-    for url in "https://download.docker.com/linux/debian/gpg" "https://mirrors.aliyun.com/docker-ce/linux/debian/gpg"; do
-        log_info "尝试下载 Docker GPG key: $url"
-        for retry in 1 2 3; do
-            if curl -fsSL --connect-timeout 10 "$url" -o /etc/apt/keyrings/docker.asc; then
-                GPG_OK=true
-                break 2
-            fi
-            log_warn "下载失败，重试 ($retry/3)..."
-            sleep 3
-        done
-    done
-    if [ "$GPG_OK" = "false" ]; then
-        log_error "Docker GPG key 下载失败，请检查网络连接"
-        exit 1
-    fi
-    chmod a+r /etc/apt/keyrings/docker.asc
-
-    CODENAME=$(. /etc/os-release && echo "$VERSION_CODENAME")
-    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian \
-${CODENAME} stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
-
-    if ! apt-get update -y; then
-        log_warn "Docker 官方源更新失败，尝试阿里云镜像源"
-        echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://mirrors.aliyun.com/docker-ce/linux/debian \
-${CODENAME} stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
-        apt-get update -y || { log_error "Docker 源更新失败"; exit 1; }
+    if [ ! -f "$service_script" ]; then
+        log_warn "从机安装服务脚本不存在: $service_script"
+        return 1
     fi
 
-    apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin || {
-        log_error "Docker 安装失败"
-        exit 1
-    }
-
-    mkdir -p /etc/docker /etc/containerd
-
-    cat > /etc/containerd/config.toml << 'DAEMON_CTR'
-disabled_plugins = ["cri"]
-root = "/home/docker/containerd"
-state = "/home/docker/containerd/state"
-DAEMON_CTR
-
-    cat > /etc/docker/daemon.json << DAEMON_EOF
-{
-  "live-restore": true,
-  "registry-mirrors": ["https://docker.1panel.live"],
-  "data-root":"/home/docker/lib",
-  "insecure-registries":["${REGISTRY_SERVER}","127.0.0.1:5000"]
-}
-DAEMON_EOF
-
-    mkdir -p /home/docker/lib /home/docker/containerd /home/docker/containerd/state
-    systemctl daemon-reload
-    systemctl restart containerd
-    systemctl restart docker
-fi
-
-log_step "登录镜像仓库..."
-echo "${REGISTRY_PASSWORD}" | docker login --username="${REGISTRY_USERNAME}" --password-stdin "${REGISTRY_SERVER}" || {
-    log_error "docker login 失败"
-    exit 1
-}
-
-log_step "安装 ops-agent..."
-sleep 10
-OPS_RETRY=0
-while [ $OPS_RETRY -lt 10 ]; do
-    OPS_INSTALLER=$(curl -sf "${GATEWAY_SERVER}/uw-ops-center/agent/installer/install") && break
-    OPS_RETRY=$((OPS_RETRY + 1))
-    echo "[WARN] ops-agent 安装脚本获取失败，重试 ($OPS_RETRY/10)..."
-    sleep 10
-done
-if [ -n "$OPS_INSTALLER" ]; then
-    echo "$OPS_INSTALLER" | bash
-else
-    echo "[ERROR] ops-agent 安装脚本获取失败，请手动安装"
-    exit 1
-fi
-
-log_ok "从机安装完成！"
-log_info "ops-agent 已启动，Master 可通过 ${GATEWAY_SERVER} 管理本机"
-SLAVE_BODY
-
-    chmod 700 "$slave_script"
-    log_ok "从机安装脚本已生成: $slave_script"
-}
-
-setup_slave_server() {
-    source_config
-    local port="${1:-8888}"
-
-    generate_slave_installer
-
-    cat > "${UNIWEB_DIR}/slave-httpd.sh" << 'HTTPD'
-#!/bin/bash
-RESPONSE=$(cat /root/uniweb/installSlave.sh)
-CONTENT_LENGTH=${#RESPONSE}
-cat > /dev/null
-echo -ne "HTTP/1.1 200 OK\r\nContent-Type: text/x-shellscript\r\nContent-Length: ${CONTENT_LENGTH}\r\nConnection: close\r\n\r\n${RESPONSE}"
-HTTPD
-    chmod 700 "${UNIWEB_DIR}/slave-httpd.sh"
-
-    cat > /etc/systemd/system/uniweb-slave-server.socket << EOF
+    cat > /etc/systemd/system/uniweb-slave-service.socket << EOF
 [Unit]
-Description=UniWeb Slave Installer Socket
+Description=UniWeb Slave Service Socket
 
 [Socket]
 ListenStream=${port}
@@ -1028,38 +896,32 @@ Accept=yes
 WantedBy=sockets.target
 EOF
 
-    cat > /etc/systemd/system/uniweb-slave-server@.service << EOF
+    cat > /etc/systemd/system/uniweb-slave-service@.service << EOF
 [Unit]
-Description=UniWeb Slave Installer Handler
+Description=UniWeb Slave Service Handler
 
 [Service]
 Type=simple
-ExecStart=${UNIWEB_DIR}/slave-httpd.sh
+ExecStart=${service_script}
 StandardInput=socket
 StandardOutput=socket
 EOF
 
-    systemctl stop uniweb-slave-server.socket 2>/dev/null || true
-    systemctl stop uniweb-slave-server.service 2>/dev/null || true
+    systemctl stop uniweb-slave-service.socket 2>/dev/null || true
+    systemctl stop uniweb-slave-service.service 2>/dev/null || true
     run_log "systemctl daemon-reload" systemctl daemon-reload
-    run_log "enable slave-server.socket" systemctl enable uniweb-slave-server.socket
-    run_log "start slave-server.socket" systemctl start uniweb-slave-server.socket
-
-    local master_ip
-    master_ip=$(ip addr show | awk '/inet / && /10\.|192\.168\./ {print $2}' | head -1 | cut -d/ -f1)
-    if [ -z "$master_ip" ]; then
-        master_ip=$(hostname -I | awk '{print $1}')
-    fi
+    run_log "enable slave-service.socket" systemctl enable uniweb-slave-service.socket
+    run_log "start slave-service.socket" systemctl start uniweb-slave-service.socket
 
     log_ok "从机安装服务已启动 (端口 ${port})"
     log_ok "从机安装命令:"
     echo ""
-    echo -e "  ${CYAN}curl -fsSL http://${master_ip}:${port}/installSlave.sh | bash${NC}"
+    echo -e "  ${CYAN}curl -fsSL http://${SYSTEM_IP}:${port}/slaveInstaller.sh | bash${NC}"
     echo ""
     log_info "管理命令:"
-    echo "  systemctl status uniweb-slave-server.socket"
-    echo "  systemctl stop uniweb-slave-server.socket"
-    echo "  systemctl disable uniweb-slave-server.socket"
+    echo "  systemctl status uniweb-slave-service.socket"
+    echo "  systemctl stop uniweb-slave-service.socket"
+    echo "  systemctl disable uniweb-slave-service.socket"
 }
 
 
@@ -1228,7 +1090,6 @@ done
 
 for i in "${UW_SELECTED[@]}"; do
     case $i in
-        0) start_uw_image "${IMAGE_UW_GATEWAY}" 80 ;;
         1) start_uw_image "${IMAGE_UW_AUTH_CENTER}" 10000; sleep 20 ;;
         2) start_uw_image "${IMAGE_UW_TASK_CENTER}" 10010; sleep 20 ;;
         3) start_uw_image "${IMAGE_UW_OPS_CENTER}" 1000; sleep 20 ;;
@@ -1265,6 +1126,8 @@ for i in "${DEV_SELECTED[@]}"; do
         3) setup_mihomo ;;
     esac
 done
+
+start_uw_image "${IMAGE_UW_GATEWAY}" 80
 
 log_ok "===== 服务安装完成 ====="
 

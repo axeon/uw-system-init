@@ -1,10 +1,10 @@
 #!/bin/bash
 # initOpsAgent.sh — 安装 ops-agent
 # 用法: $0 [等待秒数]
-#   等待秒数: 启动后等待服务就绪的时间，默认 60
+#   等待秒数: 启动后等待服务就绪的时间，默认 10
 # 前置: uw-ops-center 服务已启动且可访问
 
-WAIT_SECONDS="${1:-60}"
+WAIT_SECONDS="${1:-10}"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "${SCRIPT_DIR}/../../uniweb-system.config" 2>/dev/null || source "/root/uniweb/uniweb-system.config" 2>/dev/null
@@ -29,7 +29,8 @@ log_step "===== OPS Agent 安装 ====="
 log_info "等待服务就绪 (${WAIT_SECONDS}s)..."
 sleep "$WAIT_SECONDS"
 
-retries=0 installer
+retries=0
+installer=""
 while [ $retries -lt 10 ]; do
     installer=$(curl -sf "${GATEWAY_SERVER}/uw-ops-center/agent/installer/install" 2>/dev/null) && break
     retries=$((retries + 1))
