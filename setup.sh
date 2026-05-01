@@ -50,7 +50,7 @@ _log() {
     local msg="$*"
     local ts
     ts=$(date '+%Y-%m-%d %H:%M:%S')
-    echo -e "${color}[${tag}]${NC} ${ts} ${msg}"
+    echo -e "${ts} ${color}[${tag}]${NC} ${msg}"
     echo "${ts} [${tag}] ${msg}" >> "$LOG_FILE"
 }
 
