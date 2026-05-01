@@ -4,6 +4,7 @@ source "$(dirname "$0")/common.sh"
 
 create_dir /home/nacos8848/logs
 create_dir /home/nacos8848/conf
+touch /home/nacos8848/conf/application.properties
 
 docker_remove nacos8848
 
@@ -11,7 +12,7 @@ CID=$(docker run -d \
 -m 1g \
 -e "MODE=standalone" \
 -v /home/nacos8848/logs:/home/nacos/logs \
--v /home/nacos8848/conf:/home/nacos/conf \
+-v /home/nacos8848/conf/application.properties:/home/nacos/conf/application.properties \
 ${DOCKER_COMMON_OPTS} \
 --cpus=1 \
 --name=nacos8848 \
