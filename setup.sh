@@ -50,7 +50,7 @@ _log() {
     local msg="$*"
     local ts
     ts=$(date '+%Y-%m-%d %H:%M:%S')
-    echo -e "${color}[${tag}]${NC} ${msg}"
+    echo -e "${color}[${tag}]${NC} ${ts} ${msg}"
     echo "${ts} [${tag}] ${msg}" >> "$LOG_FILE"
 }
 
@@ -608,7 +608,11 @@ _start_service() {
 
 setup_redis()    { _start_service "Redis"    "startRedis6380.sh"; }
 setup_rabbitmq() { _start_service "RabbitMQ" "startRabbitMQ5672.sh"; }
-setup_nacos()    { _start_service "Nacos"    "startNacos8848.sh"; }
+setup_nacos() {
+    _start_service "Nacos" "startNacos8848.sh" || return 1
+    log_info "等待 Nacos 就绪 (30s)..."
+    sleep 30
+}
 setup_minio()    { _start_service "MinIO"    "startMinio9000.sh"; }
 setup_gitea()    { _start_service "Gitea"    "startGitea.sh"; }
 setup_nexus3()   { _start_service "Nexus3"   "startNexus3.sh"; }
@@ -859,21 +863,11 @@ _copy_init_home() {
 
 init_ops() {
     log_step "===== OPS 初始化 ====="
-    log_info "等待服务就绪，安装 ops-agent..."
-    sleep 60
-    local ops_retries=0 installer
-    while [ $ops_retries -lt 10 ]; do
-        installer=$(curl -sf "${GATEWAY_SERVER}/uw-ops-center/agent/installer/install" 2>/dev/null) && break
-        ops_retries=$((ops_retries + 1))
-        log_warn "ops-agent 安装脚本获取失败，重试 ($ops_retries/10)..."
-        sleep 10
-    done
-    if [ $ops_retries -ge 10 ] || [ -z "$installer" ]; then
-        log_error "ops-agent 安装脚本获取失败，请手动安装"
+    run_log "安装 ops-agent" bash "${SCRIPT_DIR}/init/initOpsAgent.sh" || {
+        log_error "ops-agent 安装失败, 请手动执行 ${SCRIPT_DIR}/init/initOpsAgent.sh"
         exit 1
-    fi
-    echo "$installer" | bash
-    log_ok "ops-agent 已安装，OPS 已接管本机"
+    }
+    log_ok "OPS 已接管本机"
 }
 
 # ============================================================
@@ -1235,12 +1229,12 @@ done
 for i in "${UW_SELECTED[@]}"; do
     case $i in
         0) start_uw_image "${IMAGE_UW_GATEWAY}" 80 ;;
-        1) start_uw_image "${IMAGE_UW_AUTH_CENTER}" 10000; sleep 10 ;;
-        2) start_uw_image "${IMAGE_UW_TASK_CENTER}" 10010; sleep 10 ;;
-        3) start_uw_image "${IMAGE_UW_OPS_CENTER}" 1000; sleep 10 ;;
-        4) start_uw_image "${IMAGE_UW_GATEWAY_CENTER}" 10030 ;;
-        5) start_uw_image "${IMAGE_UW_MYDB_CENTER}" 10020; sleep 10 ;;
-        6) start_uw_image "${IMAGE_UW_AI_CENTER}" 10081; sleep 10 ;;
+        1) start_uw_image "${IMAGE_UW_AUTH_CENTER}" 10000; sleep 20 ;;
+        2) start_uw_image "${IMAGE_UW_TASK_CENTER}" 10010; sleep 20 ;;
+        3) start_uw_image "${IMAGE_UW_OPS_CENTER}" 1000; sleep 20 ;;
+        4) start_uw_image "${IMAGE_UW_GATEWAY_CENTER}" 10030; sleep 20 ;;
+        5) start_uw_image "${IMAGE_UW_MYDB_CENTER}" 10020; sleep 20 ;;
+        6) start_uw_image "${IMAGE_UW_AI_CENTER}" 10081 ;;
         7) start_uw_image "${IMAGE_UW_MYDB_PROXY}" 3300 ;;
         8) start_uw_image "${IMAGE_UW_TINYURL_CENTER}" 10060 ;;
         9) start_uw_image "${IMAGE_UW_NOTIFY_CENTER}" 10070 ;;
@@ -1257,8 +1251,8 @@ done
 
 for i in "${SAAS_SELECTED[@]}"; do
     case $i in
-        0) start_uw_image "${IMAGE_SAAS_BASE_APP}" 20000; sleep 10 ;;
-        1) start_uw_image "${IMAGE_SAAS_FINANCE_APP}" 20080; sleep 10 ;;
+        0) start_uw_image "${IMAGE_SAAS_BASE_APP}" 20000; sleep 20 ;;
+        1) start_uw_image "${IMAGE_SAAS_FINANCE_APP}" 20080; sleep 20 ;;
         2) start_uw_ui_image "${IMAGE_SAAS_PC_UI}" 30300 ;;
     esac
 done
@@ -1267,7 +1261,7 @@ for i in "${DEV_SELECTED[@]}"; do
     case $i in
         0) setup_gitea ;;
         1) setup_nexus3 ;;
-        2) start_uw_image "${IMAGE_UW_CODE_CENTER}" 10050; sleep 10 ;;
+        2) start_uw_image "${IMAGE_UW_CODE_CENTER}" 10050; sleep 20 ;;
         3) setup_mihomo ;;
     esac
 done
