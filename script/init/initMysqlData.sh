@@ -132,8 +132,7 @@ import_sql() {
                     *)   echo "[WARN] 跳过 ${sql_file}"; return 0 ;;
                 esac
             else
-                echo "[WARN] ${sql_file}: 数据库 ${db_name} 已存在，跳过"
-                return 0
+                echo "[WARN] ${sql_file}: 数据库 ${db_name} 已存在，执行SQL语句"
             fi
         fi
     fi
