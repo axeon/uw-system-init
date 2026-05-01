@@ -9,7 +9,7 @@
 #   阶段4: 选择安装组件 (whiptail 多选菜单)
 #   阶段5: 按需分发文件 (initHome/initData/script → 目标目录)
 #   执行:  Docker + Registry → 拉取镜像 → MySQL → 导数据库 → 基础服务
-#          → 微服务 → 前端 → SaaS → 开发服务 → init_ops → setup_slave_server
+#          → 微服务 → 前端 → SaaS → 开发服务 → init_ops → setup_slave_service
 # 配置文件:
 #   uniweb-system.config  — 部署实例信息 (IP/密码/连接串)
 #   uniweb-registry.config — 镜像配置 (仓库地址/各组件版本)
@@ -1129,7 +1129,7 @@ log_ok "===== 服务安装完成 ====="
 
 init_ops
 
-setup_slave_server
+setup_slave_service
 
 log_ok "===== 全部完成 ====="
 echo ""
