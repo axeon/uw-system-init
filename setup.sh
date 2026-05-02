@@ -385,11 +385,10 @@ ${codename} stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
     cat > /etc/docker/daemon.json << EOF
 {
   "live-restore": true,
-  "registry-mirrors": ["https://docker.1panel.live"],
   "data-root":"/home/docker/lib",
   "log-driver": "json-file",
   "log-opts": { "max-size": "100m", "max-file": "3" },
-  "insecure-registries":["${UNIWEB_REGISTRY_SERVER}","127.0.0.1:5000","${REGISTRY_SERVER}"]
+  "insecure-registries":["127.0.0.1:5000","${UNIWEB_REGISTRY_SERVER}","${REGISTRY_SERVER}"] 
 }
 EOF
 

@@ -74,9 +74,10 @@ DAEMON_CTR
     cat > /etc/docker/daemon.json << DAEMON_EOF
 {
   "live-restore": true,
-  "registry-mirrors": ["https://docker.1panel.live"],
   "data-root":"/home/docker/lib",
-  "insecure-registries":["${REGISTRY_SERVER}","127.0.0.1:5000"]
+  "log-driver": "json-file",
+  "log-opts": { "max-size": "100m", "max-file": "3" },
+  "insecure-registries":["127.0.0.1:5000","${UNIWEB_REGISTRY_SERVER}","${REGISTRY_SERVER}"] 
 }
 DAEMON_EOF
 
