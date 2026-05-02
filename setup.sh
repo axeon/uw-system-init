@@ -382,13 +382,17 @@ ${codename} stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
 
     mkdir -p /etc/docker /etc/containerd
 
+    local _insecure="\"127.0.0.1:5000\",\"${REGISTRY_SERVER}\""
+    case "$UNIWEB_REGISTRY_SERVER" in
+        *:*) _insecure="${_insecure},\"${UNIWEB_REGISTRY_SERVER}\"" ;;
+    esac
     cat > /etc/docker/daemon.json << EOF
 {
   "live-restore": true,
   "data-root":"/home/docker/lib",
   "log-driver": "json-file",
   "log-opts": { "max-size": "100m", "max-file": "3" },
-  "insecure-registries":["127.0.0.1:5000","${UNIWEB_REGISTRY_SERVER}","${REGISTRY_SERVER}"] 
+  "insecure-registries":[${_insecure}]
 }
 EOF
 
@@ -451,6 +455,7 @@ _docker_logged_in=" "
 
 _docker_login() {
     local server="$1"
+    server="${server%%/*}"
     [[ "$_docker_logged_in" == *" $server "* ]] && return 0
     log_step "镜像仓库 ${server} 需要认证，请登录"
     local reg_user reg_pass login_attempt
@@ -538,6 +543,14 @@ _pull_image_to_local() {
         not_found) log_warn "上游仓库 ${image} 不存在" ;;
         auth)      log_warn "上游仓库 ${image} 需要认证，登录失败" ;;
         *)         log_warn "上游仓库 ${image} 拉取失败 (网络错误)" ;;
+    esac
+
+    local img_name="${image%%:*}"
+    case "$img_name" in
+        uw-*|saas-*)
+            log_error "私有镜像 ${image} 上游仓库拉取失败，退出"
+            exit 1
+            ;;
     esac
 
     log_info "尝试公共仓库..."
