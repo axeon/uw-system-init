@@ -52,6 +52,27 @@ git clone -b "$BRANCH" "$REPO_URL" "$INSTALL_DIR" || {
 echo "[INFO] 设置脚本权限..."
 find "$INSTALL_DIR" -type f -name "*.sh" -exec chmod +x {} \;
 
+echo "[INFO] 检查 mihomo 代理服务..."
+read -e -p "是否需要安装启动 mihomo 代理服务以加速 GitHub 和 Docker 访问? [y/N]: " USE_MIHOMO
+case "$USE_MIHOMO" in
+    y|Y)
+        echo "[INFO] 正在安装 mihomo..."
+        if ! bash "${INSTALL_DIR}/script/mihomo/proxyInstall.sh"; then
+            echo "[ERROR] mihomo 安装失败，请手动安装后重新运行"
+            exit 1
+        fi
+        read -e -p "请输入 mihomo 订阅 URL: " SUB_URL
+        if ! bash "${INSTALL_DIR}/script/mihomo/proxyConfig.sh" "$SUB_URL"; then
+            echo "[ERROR] mihomo 配置失败，请手动配置"
+            exit 1
+        fi
+        echo "[OK] mihomo 代理服务已启动"
+        ;;
+    *)
+        echo "[INFO] 跳过 mihomo 代理服务"
+        ;;
+esac
+
 echo "[INFO] 启动安装向导..."
 cd "$INSTALL_DIR"
 bash setup.sh < /dev/tty
