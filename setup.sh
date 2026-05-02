@@ -516,7 +516,7 @@ _docker_pull() {
             fi
             return 1
         fi
-        if echo "$pull_output" | grep -qiE 'not found|manifest unknown|404|403|access denied|forbidden'; then
+        if echo "$pull_output" | grep -qiE 'not found|manifest unknown|404|403|denied|forbidden'; then
             _PULL_FAIL_REASON="not_found"
             return 1
         fi
