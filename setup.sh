@@ -465,8 +465,10 @@ _docker_login() {
             return 1
         fi
         log_info "docker login ${server}..."
-        echo "$reg_pass" | docker login --username="$reg_user" --password-stdin "$server" 2>&1 | tee -a "$LOG_FILE"
-        if [ ${PIPESTATUS[0]} -eq 0 ]; then
+        local login_output
+        login_output=$(echo "$reg_pass" | docker login --username="$reg_user" --password-stdin "$server" 2>&1) || true
+        echo "$login_output" | tee -a "$LOG_FILE"
+        if echo "$login_output" | grep -qiE 'login succeeded'; then
             log_ok "仓库 ${server} 登录成功"
             _docker_logged_in="${_docker_logged_in}${server} "
             return 0
@@ -483,20 +485,26 @@ _docker_pull() {
     _PULL_FAIL_REASON="retry"
     local attempt
     for attempt in 1 2 3 4 5; do
-        docker pull "$ref" 2>&1 | tee -a "$LOG_FILE"
-        if [ ${PIPESTATUS[0]} -eq 0 ]; then
+        local pull_output
+        pull_output=$(docker pull "$ref" 2>&1) || true
+        echo "$pull_output" | tee -a "$LOG_FILE"
+
+        local img_name="${ref%%:*}"
+        local img_tag="${ref#*:}"
+        if docker images --format '{{.Repository}}:{{.Tag}}' | grep -qFx "$ref" 2>/dev/null \
+            || docker images --format '{{.Repository}}:{{.Tag}}' | grep -qFx "${img_name}:${img_tag}" 2>/dev/null; then
             _PULL_FAIL_REASON=""
             return 0
         fi
-        local last_lines
-        last_lines=$(tail -20 "$LOG_FILE")
-        if echo "$last_lines" | grep -qiE 'unauthorized|authentication required|no basic auth credentials|401'; then
+
+        if echo "$pull_output" | grep -qiE 'unauthorized|authentication required|no basic auth credentials|401'; then
             _PULL_FAIL_REASON="auth"
             if [ -n "$server" ]; then
                 log_info "${desc}需要认证，引导登录..."
                 if _docker_login "$server"; then
-                    docker pull "$ref" 2>&1 | tee -a "$LOG_FILE"
-                    if [ ${PIPESTATUS[0]} -eq 0 ]; then
+                    pull_output=$(docker pull "$ref" 2>&1) || true
+                    echo "$pull_output" | tee -a "$LOG_FILE"
+                    if docker images --format '{{.Repository}}:{{.Tag}}' | grep -qFx "$ref" 2>/dev/null; then
                         _PULL_FAIL_REASON=""
                         return 0
                     fi
@@ -504,7 +512,7 @@ _docker_pull() {
             fi
             return 1
         fi
-        if echo "$last_lines" | grep -qiE 'not found|manifest unknown|404|403|access denied|forbidden'; then
+        if echo "$pull_output" | grep -qiE 'not found|manifest unknown|404|403|access denied|forbidden'; then
             _PULL_FAIL_REASON="not_found"
             return 1
         fi
