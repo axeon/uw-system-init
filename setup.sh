@@ -454,48 +454,60 @@ _docker_login() {
     local server="$1"
     [[ "$_docker_logged_in" == *" $server "* ]] && return 0
     log_step "镜像仓库 ${server} 需要认证，请登录"
-    local reg_user reg_pass
-    read -e -p "用户名: " reg_user
-    read -e -s -p "密码: " reg_pass
-    echo ""
-    if [ -z "$reg_user" ] || [ -z "$reg_pass" ]; then
-        log_warn "用户名或密码为空，跳过登录"
-        return 1
-    fi
-    log_info "docker login ${server}..."
-    echo "$reg_pass" | docker login --username="$reg_user" --password-stdin "$server" 2>&1 | tee -a "$LOG_FILE" || {
+    local reg_user reg_pass login_attempt
+    for login_attempt in 1 2 3; do
+        read -e -p "用户名: " reg_user
+        read -e -s -p "密码: " reg_pass
+        echo ""
+        if [ -z "$reg_user" ] || [ -z "$reg_pass" ]; then
+            log_warn "用户名或密码为空"
+            [ $login_attempt -lt 3 ] && log_warn "请重新输入 ($login_attempt/3)..." && continue
+            return 1
+        fi
+        log_info "docker login ${server}..."
+        if echo "$reg_pass" | docker login --username="$reg_user" --password-stdin "$server" 2>&1 | tee -a "$LOG_FILE"; then
+            log_ok "仓库 ${server} 登录成功"
+            _docker_logged_in="${_docker_logged_in}${server} "
+            return 0
+        fi
         log_warn "仓库 ${server} 登录失败"
-        return 1
-    }
-    log_ok "仓库 ${server} 登录成功"
-    _docker_logged_in="${_docker_logged_in}${server} "
-    return 0
+        [ $login_attempt -lt 3 ] && log_warn "请重新输入 ($login_attempt/3)..."
+    done
+    log_error "仓库 ${server} 登录失败次数过多，退出"
+    exit 1
 }
 
 _docker_pull() {
     local desc="$1" ref="$2" server="$3"
+    _PULL_FAIL_REASON="retry"
     local attempt
-    for attempt in 1 2 3; do
+    for attempt in 1 2 3 4 5; do
         docker pull "$ref" 2>&1 | tee -a "$LOG_FILE"
         if [ ${PIPESTATUS[0]} -eq 0 ]; then
+            _PULL_FAIL_REASON=""
             return 0
         fi
         local last_lines
         last_lines=$(tail -20 "$LOG_FILE")
         if echo "$last_lines" | grep -qiE 'unauthorized|authentication required|access denied|401|403|no basic auth credentials'; then
+            _PULL_FAIL_REASON="auth"
             if [ -n "$server" ]; then
                 log_info "${desc}需要认证，引导登录..."
                 if _docker_login "$server"; then
                     docker pull "$ref" 2>&1 | tee -a "$LOG_FILE"
-                    [ ${PIPESTATUS[0]} -eq 0 ] && return 0
+                    if [ ${PIPESTATUS[0]} -eq 0 ]; then
+                        _PULL_FAIL_REASON=""
+                        return 0
+                    fi
                 fi
             fi
             return 1
         fi
         if echo "$last_lines" | grep -qiE 'not found|manifest unknown|404'; then
+            _PULL_FAIL_REASON="not_found"
             return 1
         fi
-        [ $attempt -lt 3 ] && log_warn "拉取失败，重试 ($attempt/3)..." && sleep 5
+        [ $attempt -lt 5 ] && log_warn "拉取失败，重试 ($attempt/5)..." && sleep 5
     done
     return 1
 }
@@ -514,6 +526,11 @@ _pull_image_to_local() {
         docker push "$local_ref" 2>&1 | tee -a "$LOG_FILE"
         return 0
     fi
+    case "$_PULL_FAIL_REASON" in
+        not_found) log_warn "上游仓库 ${image} 不存在" ;;
+        auth)      log_warn "上游仓库 ${image} 需要认证，登录失败" ;;
+        *)         log_warn "上游仓库 ${image} 拉取失败 (网络错误)" ;;
+    esac
 
     log_info "尝试公共仓库..."
     if _docker_pull "" "$public_ref" "${PUBLIC_REGISTRY_SERVER}"; then
@@ -522,9 +539,14 @@ _pull_image_to_local() {
         docker push "$local_ref" 2>&1 | tee -a "$LOG_FILE"
         return 0
     fi
+    case "$_PULL_FAIL_REASON" in
+        not_found) log_error "公共仓库 ${image} 不存在" ;;
+        auth)      log_error "公共仓库 ${image} 需要认证，登录失败" ;;
+        *)         log_error "公共仓库 ${image} 拉取失败 (网络错误)" ;;
+    esac
 
-    log_warn "镜像拉取失败: ${image}，将在启动时重试"
-    return 1
+    log_error "镜像 ${image} 从所有仓库拉取均失败，退出"
+    exit 1
 }
 
 pull_selected_images() {
