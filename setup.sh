@@ -474,14 +474,29 @@ _docker_login() {
 
 _docker_pull() {
     local desc="$1" ref="$2" server="$3"
-    local stderr
-    stderr=$(docker pull "$ref" 2>&1 >/dev/null) && return 0
-    if [ -n "$server" ] && echo "$stderr" | grep -qiE 'unauthorized|authentication required|access denied|401|403|no basic auth credentials'; then
-        log_info "${desc}需要认证，引导登录..."
-        if _docker_login "$server"; then
-            docker pull "$ref" && return 0
+    local attempt
+    for attempt in 1 2 3; do
+        docker pull "$ref" 2>&1 | tee -a "$LOG_FILE"
+        if [ ${PIPESTATUS[0]} -eq 0 ]; then
+            return 0
         fi
-    fi
+        local last_lines
+        last_lines=$(tail -20 "$LOG_FILE")
+        if echo "$last_lines" | grep -qiE 'unauthorized|authentication required|access denied|401|403|no basic auth credentials'; then
+            if [ -n "$server" ]; then
+                log_info "${desc}需要认证，引导登录..."
+                if _docker_login "$server"; then
+                    docker pull "$ref" 2>&1 | tee -a "$LOG_FILE"
+                    [ ${PIPESTATUS[0]} -eq 0 ] && return 0
+                fi
+            fi
+            return 1
+        fi
+        if echo "$last_lines" | grep -qiE 'not found|manifest unknown|404'; then
+            return 1
+        fi
+        [ $attempt -lt 3 ] && log_warn "拉取失败，重试 ($attempt/3)..." && sleep 5
+    done
     return 1
 }
 
@@ -495,14 +510,16 @@ _pull_image_to_local() {
 
     if _docker_pull "上游仓库 " "$upstream_ref" "${UNIWEB_REGISTRY_SERVER}"; then
         docker tag "$upstream_ref" "$local_ref"
-        run_silent "推送到本地仓库 ${local_ref}" docker push "$local_ref"
+        log_info "推送 ${local_ref}..."
+        docker push "$local_ref" 2>&1 | tee -a "$LOG_FILE"
         return 0
     fi
 
     log_info "尝试公共仓库..."
     if _docker_pull "" "$public_ref" "${PUBLIC_REGISTRY_SERVER}"; then
         docker tag "$public_ref" "$local_ref"
-        run_silent "推送到本地仓库 ${local_ref}" docker push "$local_ref"
+        log_info "推送 ${local_ref}..."
+        docker push "$local_ref" 2>&1 | tee -a "$LOG_FILE"
         return 0
     fi
 
