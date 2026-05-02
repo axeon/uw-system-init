@@ -465,7 +465,8 @@ _docker_login() {
             return 1
         fi
         log_info "docker login ${server}..."
-        if echo "$reg_pass" | docker login --username="$reg_user" --password-stdin "$server" 2>&1 | tee -a "$LOG_FILE"; then
+        echo "$reg_pass" | docker login --username="$reg_user" --password-stdin "$server" 2>&1 | tee -a "$LOG_FILE"
+        if [ ${PIPESTATUS[0]} -eq 0 ]; then
             log_ok "仓库 ${server} 登录成功"
             _docker_logged_in="${_docker_logged_in}${server} "
             return 0
@@ -489,7 +490,7 @@ _docker_pull() {
         fi
         local last_lines
         last_lines=$(tail -20 "$LOG_FILE")
-        if echo "$last_lines" | grep -qiE 'unauthorized|authentication required|access denied|401|403|no basic auth credentials'; then
+        if echo "$last_lines" | grep -qiE 'unauthorized|authentication required|no basic auth credentials|401'; then
             _PULL_FAIL_REASON="auth"
             if [ -n "$server" ]; then
                 log_info "${desc}需要认证，引导登录..."
@@ -503,7 +504,7 @@ _docker_pull() {
             fi
             return 1
         fi
-        if echo "$last_lines" | grep -qiE 'not found|manifest unknown|404'; then
+        if echo "$last_lines" | grep -qiE 'not found|manifest unknown|404|403|access denied|forbidden'; then
             _PULL_FAIL_REASON="not_found"
             return 1
         fi
