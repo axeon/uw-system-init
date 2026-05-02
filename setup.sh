@@ -790,7 +790,7 @@ import_selected_databases() {
 start_uw_image() {
     local image="$1"
     local port="$2"
-    local mem_limit="${3:-0}"
+    local mem_limit="${3:-800m}"
     local name="${image%%:*}"
     local version="${image#*:}"
     log_step "启动 ${name}..."
@@ -930,19 +930,23 @@ EOF
 check_root
 print_banner
 
-# --- 阶段 0: Mihomo 代理服务 ---
-log_step "===== 阶段 0: Mihomo 代理服务 ====="
+# --- 阶段 1: 安装系统依赖 ---
+log_step "===== 阶段 1: 安装系统依赖 ====="
+install_system_deps
+
+# --- 阶段 2: Mihomo 代理服务 ---
+log_step "===== 阶段 2: Mihomo 代理服务 ====="
 read -e -p "是否需要安装启动 mihomo 代理服务以加速 GitHub 和 Docker 访问? [y/N]: " USE_MIHOMO
 case "$USE_MIHOMO" in
     y|Y)
         log_info "正在安装 mihomo..."
         if ! bash "${REPO_DIR}/script/mihomo/proxyInstall.sh"; then
-            log_error "mihomo 安装失败，请手动安装后重新运行后直接跳过mihomo安装步骤"
+            log_error "mihomo 安装失败，请手动安装后重新运行"
             exit 1
         fi
         read -e -p "请输入 mihomo 订阅 URL: " SUB_URL
         if ! bash "${REPO_DIR}/script/mihomo/proxyConfig.sh" "$SUB_URL"; then
-            log_error "mihomo 配置失败，请手动配置后直接跳过mihomo安装步骤"
+            log_error "mihomo 配置失败，请手动配置"
             exit 1
         fi
         log_ok "mihomo 代理服务已启动"
@@ -952,13 +956,9 @@ case "$USE_MIHOMO" in
         ;;
 esac
 
-# --- 阶段 1: 安装系统依赖 ---
-log_step "===== 阶段 1: 安装系统依赖 ====="
-install_system_deps
 
-
-# --- 阶段 2: 配置生成 ---
-log_step "===== 阶段 2: 配置生成 ====="
+# --- 阶段 3: 配置生成 ---
+log_step "===== 阶段 3: 配置生成 ====="
 if [ -f "$CONFIG_FILE" ]; then
     log_info "检测到已有配置文件: $CONFIG_FILE"
     read -e -p "是否使用已有配置? [Y/n]: " USE_EXISTING
@@ -978,12 +978,12 @@ case "$EDIT_IT" in
     *) ;;
 esac
 
-# --- 阶段 3: 配置应用 (替换 #{KEY} 占位符) ---
-log_step "===== 阶段 3: 配置应用 ====="
+# --- 阶段 4: 配置应用 (替换 #{KEY} 占位符) ---
+log_step "===== 阶段 4: 配置应用 ====="
 apply_config
 
-# --- 阶段 4: 选择安装组件 (whiptail 多选菜单) ---
-log_step "===== 阶段 4: 选择安装组件 ====="
+# --- 阶段 5: 选择安装组件 (whiptail 多选菜单) ---
+log_step "===== 阶段 5: 选择安装组件 ====="
 
 BASIC_ITEMS=("MySQL 数据库" "Redis 缓存服务" "RabbitMQ 队列服务" "ES+Kibana 日志服务" "Nacos 服务管理" "MinIO 存储服务")
 UW_ITEMS=("uw-gateway 网关服务" "uw-auth-center 鉴权中心" "uw-task-center 任务中心" "uw-ops-center 运维中心" "uw-gateway-center 网关中心" "uw-mydb-center 数据中心" "uw-ai-center AI中心" "uw-mydb-proxy 数据代理" "uw-tinyurl-center 短链中心" "uw-notify-center 通知中心")
@@ -1029,8 +1029,8 @@ case "$CONFIRM" in
     *)   log_warn "无效输入，请重新确认"; exit 0 ;;
 esac
 
-# --- 阶段 5: 按需分发文件 (仅复制选中组件对应的 initHome/initData) ---
-log_step "===== 阶段 5: 按需分发文件 ====="
+# --- 阶段 6: 按需分发文件 (仅复制选中组件对应的 initHome/initData) ---
+log_step "===== 阶段 6: 按需分发文件 ====="
 
 log_info "复制 script -> ${UNIWEB_DIR}/script/"
 _copy_dir_safe "${REPO_DIR}/script" "${UNIWEB_DIR}/script"
@@ -1074,8 +1074,8 @@ fi
 find "${UNIWEB_DIR}/script" -type f -name "*.sh" -exec chmod +x {} \;
 log_ok "文件分发完成"
 
-# --- 执行安装 ---
-log_step "===== 开始安装 ====="
+# --- 阶段 7: 执行安装 ---
+log_step "===== 阶段 7: 执行安装 ====="
 
 source_versions
 source_config
