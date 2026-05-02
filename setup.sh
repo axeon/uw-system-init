@@ -930,6 +930,28 @@ EOF
 check_root
 print_banner
 
+# --- 阶段 0: Mihomo 代理服务 ---
+log_step "===== 阶段 0: Mihomo 代理服务 ====="
+read -e -p "是否需要安装启动 mihomo 代理服务以加速 GitHub 和 Docker 访问? [y/N]: " USE_MIHOMO
+case "$USE_MIHOMO" in
+    y|Y)
+        log_info "正在安装 mihomo..."
+        if ! bash "${REPO_DIR}/script/mihomo/proxyInstall.sh"; then
+            log_error "mihomo 安装失败，请手动安装后重新运行后直接跳过mihomo安装步骤"
+            exit 1
+        fi
+        read -e -p "请输入 mihomo 订阅 URL: " SUB_URL
+        if ! bash "${REPO_DIR}/script/mihomo/proxyConfig.sh" "$SUB_URL"; then
+            log_error "mihomo 配置失败，请手动配置后直接跳过mihomo安装步骤"
+            exit 1
+        fi
+        log_ok "mihomo 代理服务已启动"
+        ;;
+    *)
+        log_info "跳过 mihomo 代理服务"
+        ;;
+esac
+
 # --- 阶段 1: 安装系统依赖 ---
 log_step "===== 阶段 1: 安装系统依赖 ====="
 install_system_deps
