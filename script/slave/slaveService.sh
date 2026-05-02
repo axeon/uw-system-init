@@ -24,7 +24,8 @@ BODY=$(sed \
     -e "s|^REGISTRY_PASSWORD=\"\"|REGISTRY_PASSWORD=\"${REGISTRY_PASSWORD}\"|" \
     -e "s|^GATEWAY_SERVER=\"\"|GATEWAY_SERVER=\"${GATEWAY_SERVER}\"|" \
     "$TEMPLATE")
+BODY="${BODY}"$'\n'
 
-SIZE=${#BODY}
+SIZE=$(printf '%s' "$BODY" | wc -c)
 printf "HTTP/1.1 200 OK\r\nContent-Type: text/x-shellscript\r\nContent-Length: %d\r\nConnection: close\r\n\r\n" "$SIZE"
 printf '%s' "$BODY"
