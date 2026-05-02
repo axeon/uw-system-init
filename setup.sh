@@ -485,7 +485,7 @@ _docker_pull() {
     local attempt
     for attempt in 1 2 3 4 5; do
         local pull_output
-        pull_output=$(docker pull "$ref" 2>&1) || true
+        pull_output=$(timeout 30 docker pull "$ref" 2>&1) || true
         echo "$pull_output" | tee -a "$LOG_FILE"
 
         local img_name="${ref%%:*}"
@@ -501,7 +501,7 @@ _docker_pull() {
             if [ -n "$server" ]; then
                 log_info "${desc}需要认证，引导登录..."
                 if _docker_login "$server"; then
-                    pull_output=$(docker pull "$ref" 2>&1) || true
+                    pull_output=$(timeout 30 docker pull "$ref" 2>&1) || true
                     echo "$pull_output" | tee -a "$LOG_FILE"
                     if docker images --format '{{.Repository}}:{{.Tag}}' | grep -qFx "$ref" 2>/dev/null; then
                         _PULL_FAIL_REASON=""
