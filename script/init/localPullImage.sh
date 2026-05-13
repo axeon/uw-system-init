@@ -1,0 +1,21 @@
+#!/bin/bash
+# localPullImage.sh — 从本地仓库批量拉取所有 UniWeb 镜像更新本地缓存
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+source "${SCRIPT_DIR}/../common.sh"
+
+docker pull "${REGISTRY_SERVER}/${IMAGE_MYSQL}"
+docker pull "${REGISTRY_SERVER}/${IMAGE_UW_GATEWAY}"
+docker pull "${REGISTRY_SERVER}/${IMAGE_UW_AUTH_CENTER}"
+docker pull "${REGISTRY_SERVER}/${IMAGE_UW_TASK_CENTER}"
+docker pull "${REGISTRY_SERVER}/${IMAGE_UW_OPS_CENTER}"
+docker pull "${REGISTRY_SERVER}/${IMAGE_UW_GATEWAY_CENTER}"
+docker pull "${REGISTRY_SERVER}/${IMAGE_UW_MYDB_CENTER}"
+docker pull "${REGISTRY_SERVER}/${IMAGE_UW_MYDB_PROXY}"
+docker pull "${REGISTRY_SERVER}/${IMAGE_UW_TINYURL_CENTER}"
+docker pull "${REGISTRY_SERVER}/${IMAGE_UW_NOTIFY_CENTER}"
+docker pull "${REGISTRY_SERVER}/${IMAGE_ROOT_PC_UI}"
+docker pull "${REGISTRY_SERVER}/${IMAGE_OPS_PC_UI}"
+docker pull "${REGISTRY_SERVER}/${IMAGE_ADMIN_PC_UI}"
+docker pull "${REGISTRY_SERVER}/${IMAGE_SAAS_BASE_APP}"
+docker pull "${REGISTRY_SERVER}/${IMAGE_SAAS_FINANCE_APP}"
+docker pull "${REGISTRY_SERVER}/${IMAGE_SAAS_PC_UI}"

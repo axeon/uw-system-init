@@ -1,0 +1,13 @@
+#
+# ** THIS IS AN AUTO-GENERATED FILE **
+#
+
+# Default Kibana configuration for docker target
+server.host: "0.0.0.0"
+server.port: 5601
+server.shutdownTimeout: "5s"
+elasticsearch.hosts: [ "#{LOG_ES_SERVER}" ]
+elasticsearch.serviceAccountToken: "#{ELASTICSEARCH_SERVICE_ACCOUNT_TOKEN}"
+monitoring.ui.container.elasticsearch.enabled: true
+i18n.locale: "zh-CN"
+csp.strict: false
