@@ -87,6 +87,7 @@ download_runner() {
     fi
 
     chmod 755 "${RUNNER_BIN}"
+    chmod 755 ${RUNNER_DIR}/deploy/*.sh
     log_info "act_runner 下载完成并已赋予执行权限"
 }
 
@@ -164,6 +165,7 @@ register_runner() {
 
 fix_permissions() {
     chown -R "${RUNNER_USER}:${RUNNER_USER}" "${RUNNER_DIR}"
+
     log_info "目录权限已修正"
 }
 
