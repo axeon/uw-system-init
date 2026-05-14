@@ -40,3 +40,19 @@ npm install -g pnpm
 npm config set registry https://registry.npmmirror.com
 pnpm config set registry https://registry.npmmirror.com
 ```
+
+## 4. 配置 docker buildx 配置文件
+
+编辑 `/etc/docker/buildkitd.toml`，配置国内镜像源：
+
+```toml
+[registry."docker.io"]
+  mirrors = [
+    "docker.1panel.live",
+    "docker.nju.edu.cn",
+    "docker.mirrors.ustc.edu.cn"
+  ]
+
+[registry."127.0.0.1:5000"]
+  http = true
+```
