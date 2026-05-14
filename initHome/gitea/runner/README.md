@@ -12,25 +12,27 @@
 /home/gitea/runner/bin/initRunner.sh
 ```
 
-## 2. 安装 SDKMAN（JDK + Maven）
+## 2. 安装 SDKMAN（JDK + Maven） & NVM（Node.js + pnpm）
 
 ```bash
 # 安装 SDKMAN
 curl -s "https://get.sdkman.io" | bash
 
-# SDKMAN 默认写入 .zshrc，Debian 下需迁移到 .profile 以确保 login shell 加载
-mv ~/.zshrc ~/.profile
+# 安装 NVM
+curl -s "https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.3/install.sh" | bash
+
+# SDKMAN 默认写入 .bashrc，Debian 下需迁移到 .profile 以确保 login shell 加载
+mv ~/.bashrc ~/.profile
+
+```
+
+## 3. 安装 JDK 25.0.3-oracle & Maven 3.9.8 & Node.js 18 及 pnpm
+
+```bash
 
 # 安装 JDK 和 Maven
 sdk install java 25.0.3-oracle
 sdk install maven 3.9.8
-```
-
-## 3. 安装 NVM（Node.js + pnpm）
-
-```bash
-# 安装 NVM
-curl -s "https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.3/install.sh" | bash
 
 # 安装 Node.js 18 及 pnpm
 nvm install 18
