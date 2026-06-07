@@ -783,7 +783,7 @@ EOF
     },
     "lifecycle": { "enabled": true, "data_retention": "30d" }
   },
-  "index_patterns": ["uw-*","saas-*","*-app","*-center"],
+  "index_patterns": ["uw-*","*-app","*-center"],
   "data_stream": { "hidden": false, "allow_custom_routing": false },
   "composed_of": []
 }
