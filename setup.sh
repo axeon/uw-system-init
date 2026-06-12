@@ -965,8 +965,8 @@ _copy_init_home() {
 
 init_ops() {
     log_step "===== OPS 初始化 ====="
-    run_log "安装 ops-agent" bash "${SCRIPT_DIR}/init/initOpsAgent.sh" || {
-        log_warn "ops-agent 安装失败, 请手动执行 ${SCRIPT_DIR}/init/initOpsAgent.sh"
+    run_log "安装 uw-ops-agent" bash "${SCRIPT_DIR}/init/initOpsAgent.sh" || {
+        log_warn "uw-ops-agent 安装失败, 请手动执行 ${SCRIPT_DIR}/init/initOpsAgent.sh"
         return 1
     }
     log_ok "OPS 已接管本机"
