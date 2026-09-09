@@ -15,7 +15,7 @@ UniWeb 微服务平台一键部署工具。通过交互式向导自动完成系�
 
 | 分类 | 组件 |
 |------|------|
-| **基础设施** | MySQL 8.4 · Redis 8 · RabbitMQ 4 · Elasticsearch 8 + Kibana · Nacos 2.3 · MinIO |
+| **基础设施** | MySQL 8.4 · Redis 8 · RabbitMQ 4 · Elasticsearch 9 + Kibana · Nacos 2.3 · MinIO |
 | **UniWeb 微服务** | Gateway · Auth Center · Task Center · Ops Center · Gateway Center · AI Center · MyDB Center · MyDB Proxy · TinyURL Center · Notify Center |
 | **UniWeb 前端** | Root PC UI · Ops PC UI · Admin PC UI |
 | **SaaS 服务** | SaaS Base · SaaS Finance · SaaS PC UI |
@@ -84,6 +84,13 @@ uw-system-init/
 │   └── ...
 └── script/                     # 独立启停脚本
     ├── common.sh               # 共享基础函数
+    ├── init/                   # 组件初始化脚本（可独立重跑，用于重置/重装）
+    │   ├── initDocker.sh       # Docker+containerd 安装修复（apt 源/daemon.json）
+    │   ├── initRegistry.sh     # 本地 Registry 认证重置 + 启动
+    │   ├── initEs.sh           # ES+Kibana（内核参数 + logsdb 索引模板 + Kibana Token）
+    │   ├── initMysqlData.sh    # 数据库初始化数据导入
+    │   ├── initOpsAgent.sh     # ops-agent 接管
+    │   └── ...
     ├── startMydbMysql3308.sh
     ├── startRedis6380.sh
     ├── startNacos8848.sh
@@ -109,6 +116,15 @@ bash /root/uniweb/script/startRedis6380.sh
 
 # 启动 Nacos
 bash /root/uniweb/script/startNacos8848.sh
+
+# 重置/重装 ES+Kibana 组件（内核参数 + 启动 + 索引模板 + Kibana Token，可重复执行）
+bash /root/uniweb/script/init/initEs.sh
+
+# Docker 环境修复/重装（已安装且正常时自动跳过）
+bash /root/uniweb/script/init/initDocker.sh
+
+# 重置 Registry 认证（修改 REGISTRY_PASSWORD 后重新生成 htpasswd 并 login）
+bash /root/uniweb/script/init/initRegistry.sh
 ```
 
 所有脚本通过 `common.sh` 共享 Docker 运行参数（时区、host 网络、自动重启）。

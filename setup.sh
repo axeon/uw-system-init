@@ -357,133 +357,21 @@ apply_config() {
 # ============================================================
 
 install_docker() {
-    log_step "安装 Docker..."
-
-    if command -v docker &>/dev/null && docker info &>/dev/null; then
-        log_ok "Docker 已安装，跳过"
-        return 0
-    fi
-
-    install -m 0755 -d /etc/apt/keyrings
-
-    local gpg_ok=false
-    local gpg_urls=(
-        "https://download.docker.com/linux/debian/gpg"
-        "https://mirrors.aliyun.com/docker-ce/linux/debian/gpg"
-    )
-    for url in "${gpg_urls[@]}"; do
-        log_info "尝试下载 Docker GPG key: $url"
-        for retry in 1 2 3; do
-            if curl -fsSL --connect-timeout 10 "$url" -o /etc/apt/keyrings/docker.asc; then
-                gpg_ok=true
-                break 2
-            fi
-            log_warn "下载失败，重试 ($retry/3)..."
-            sleep 3
-        done
-    done
-    if [ "$gpg_ok" = "false" ]; then
-        log_error "Docker GPG key 下载失败，请检查网络连接"
-        exit 1
-    fi
-    chmod a+r /etc/apt/keyrings/docker.asc
-
-    local codename
-    codename=$(. /etc/os-release && echo "$VERSION_CODENAME")
-    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian \
-${codename} stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
-
-    if ! run_log "apt-get update (docker)" apt-get update -y; then
-        log_warn "Docker 官方源更新失败，尝试阿里云镜像源"
-        echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://mirrors.aliyun.com/docker-ce/linux/debian \
-${codename} stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
-        run_log "apt-get update (aliyun docker)" apt-get update -y || {
-            log_error "Docker 源更新失败，请检查网络连接"
-            exit 1
-        }
-    fi
-
-    run_log "apt-get install docker" apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin || {
+    # 独立初始化脚本: Docker CE 安装 + sshd 自检修复 + daemon.json/containerd 配置
+    # 可单独执行用于 Docker 环境修复/重装: bash ${SCRIPT_DIR}/init/initDocker.sh
+    run_log "安装 Docker" bash "${SCRIPT_DIR}/init/initDocker.sh" || {
         log_error "Docker 安装失败"
         exit 1
     }
-
-    log_info "检查 sshd 是否因 OpenSSL 版本变化而异常..."
-    if ! sshd -t 2>/dev/null; then
-        log_warn "sshd 配置检测失败，可能 OpenSSL 版本不匹配，正在重装..."
-        apt-get install -y --reinstall openssh-server openssh-client || true
-        systemctl restart sshd 2>/dev/null || systemctl restart ssh 2>/dev/null || true
-        if sshd -t 2>/dev/null; then
-            log_ok "sshd 修复成功"
-        else
-            log_error "sshd 修复失败，请手动检查"
-        fi
-    fi
-
-    mkdir -p /etc/docker /etc/containerd
-
-    local _insecure="\"127.0.0.1:5000\",\"${REGISTRY_SERVER}\""
-    case "$UNIWEB_REGISTRY_SERVER" in
-        *:*) _insecure="${_insecure},\"${UNIWEB_REGISTRY_SERVER}\"" ;;
-    esac
-    cat > /etc/docker/daemon.json << EOF
-{
-  "live-restore": true,
-  "data-root":"/home/docker/lib",
-  "log-driver": "json-file",
-  "log-opts": { "max-size": "100m", "max-file": "3" },
-  "insecure-registries":[${_insecure}]
-}
-EOF
-
-    cat > /etc/containerd/config.toml << 'EOF'
-disabled_plugins = ["cri"]
-root = "/home/docker/containerd"
-state = "/home/docker/containerd/state"
-EOF
-
-    mkdir -p /home/docker/lib /home/docker/containerd /home/docker/containerd/state
-    run_log "systemctl daemon-reload" systemctl daemon-reload
-    run_log "重启 containerd" systemctl restart containerd
-    run_log "重启 docker" systemctl restart docker
-    log_ok "Docker 安装完成"
 }
 
 install_registry() {
-    source_config
-    log_info "设置 Registry 密码..."
-    mkdir -p /home/registry/auth /home/registry/data
-    run_log "htpasswd" htpasswd -Bbc /home/registry/auth/htpasswd "$REGISTRY_USERNAME" "$REGISTRY_PASSWORD"
-
-    log_step "启动 Registry 镜像仓库..."
-    run_log "startRegistry5000" bash "${SCRIPT_DIR}/startRegistry5000.sh" || {
-        log_error "Registry 启动失败"
+    # 独立初始化脚本: htpasswd 认证 + 启动 Registry + docker login
+    # 可单独执行用于重置 Registry 认证: bash ${SCRIPT_DIR}/init/initRegistry.sh
+    run_log "安装 Registry" bash "${SCRIPT_DIR}/init/initRegistry.sh" || {
+        log_error "Registry 安装失败"
         exit 1
     }
-
-    log_info "等待 Registry 就绪..."
-    local reg_retries=0
-    while [ $reg_retries -lt 30 ]; do
-        local http_code
-        http_code=$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:5000/v2/" 2>/dev/null)
-        if [ "$http_code" -ge 200 ] && [ "$http_code" -lt 500 ]; then
-            break
-        fi
-        reg_retries=$((reg_retries + 1))
-        echo "  等待 Registry... ($reg_retries/30)"
-        sleep 2
-    done
-    if [ $reg_retries -ge 30 ]; then
-        log_error "Registry 等待超时"
-        exit 1
-    fi
-
-    log_info "docker login ${REGISTRY_SERVER}..."
-    echo "$REGISTRY_PASSWORD" | docker login --username="$REGISTRY_USERNAME" --password-stdin "$REGISTRY_SERVER" 2>&1 | tee -a "$LOG_FILE" || {
-        log_error "docker login 失败"
-        exit 1
-    }
-    log_ok "Registry 安装完成"
 }
 
 # ============================================================
@@ -719,114 +607,12 @@ setup_gitea()    { _start_service "Gitea"    "startGitea.sh"; }
 setup_nexus3()   { _start_service "Nexus3"   "startNexus3.sh"; }
 
 setup_es() {
-    log_step "初始化 ES 环境..."
-
-    grep -q 'vm.max_map_count=262144' /etc/sysctl.conf 2>/dev/null || {
-        cat >> /etc/sysctl.conf <<'EOF'
-vm.max_map_count=262144
-fs.file-max=6815744
-EOF
-    }
-    sysctl -p /etc/sysctl.conf 2>/dev/null | tail -5 >> "$LOG_FILE"
-
-    ulimit -n 65535
-    ulimit -u 32768
-    ulimit -l unlimited
-
-    grep -q 'soft nofile 65535' /etc/security/limits.conf 2>/dev/null || {
-        cat >> /etc/security/limits.conf <<'EOF'
-* soft nofile 65535
-* hard nofile 65535
-* soft nproc 32768
-* hard nproc 32768
-* soft memlock unlimited
-* hard memlock unlimited
-EOF
-    }
-
-    log_ok "ES 环境参数已设置"
-
-    log_step "启动 Elasticsearch..."
-    run_log "启动 ES" bash "${SCRIPT_DIR}/startES9200.sh" || {
-        log_error "ES 容器启动失败"
+    # 独立初始化脚本: 内核参数 + 启动 ES + logsdb 索引模板 + Kibana Token + 启动 Kibana
+    # 可单独执行用于重置/重装 ES+Kibana: bash ${SCRIPT_DIR}/init/initEs.sh
+    run_log "初始化 ES+Kibana" bash "${SCRIPT_DIR}/init/initEs.sh" || {
+        log_error "ES+Kibana 初始化失败，可手动重试: ${SCRIPT_DIR}/init/initEs.sh"
         return 1
     }
-    log_info "等待 ES 就绪..."
-    local es_retries=0
-    while [ $es_retries -lt 30 ]; do
-        if curl -sk -u "${LOG_ES_USERNAME}:${LOG_ES_PASSWORD}" "${LOG_ES_SERVER}/_cluster/health" > /dev/null 2>&1; then
-            log_ok "ES 已就绪"
-            break
-        fi
-        es_retries=$((es_retries + 1))
-        echo "  等待 ES... ($es_retries/30)"
-        sleep 2
-    done
-    if [ $es_retries -ge 30 ]; then
-        log_error "ES 等待超时"
-        return 1
-    fi
-
-    log_step "初始化 ES 配置（数据流 + Kibana Token）..."
-
-    local http_code
-    http_code=$(curl -sk -o /dev/null -w "%{http_code}" -u "${LOG_ES_USERNAME}:${LOG_ES_PASSWORD}" -H "Content-Type: application/json" -d '
-{
-  "priority": 9,
-  "template": {
-    "settings": { "index": { "number_of_replicas": "0", "refresh_interval": "10s" } },
-    "mappings": {
-      "dynamic": true, "numeric_detection": false, "date_detection": true,
-      "dynamic_date_formats": ["strict_date_optional_time","yyyy/MM/dd HH:mm:ss Z||yyyy/MM/dd Z"],
-      "_source": { "enabled": true, "includes": [], "excludes": [] },
-      "_routing": { "required": false }, "subobjects": true, "dynamic_templates": []
-    },
-    "lifecycle": { "enabled": true, "data_retention": "30d" }
-  },
-  "index_patterns": ["uw-*","*-app","*-center"],
-  "data_stream": { "hidden": false, "allow_custom_routing": false },
-  "composed_of": []
-}
-' -X PUT "${LOG_ES_SERVER}/_index_template/uw-app-log")
-    if [ "$http_code" -ge 200 ] && [ "$http_code" -lt 300 ]; then
-        log_ok "索引模板 uw-app-log 创建成功 ($http_code)"
-    else
-        log_warn "索引模板 uw-app-log 创建失败 (HTTP $http_code)"
-    fi
-
-    http_code=$(curl -sk -o /dev/null -w "%{http_code}" -u "${LOG_ES_USERNAME}:${LOG_ES_PASSWORD}" -H "Content-Type: application/json" -d '
-{
-  "priority": 10,
-  "template": {
-    "settings": { "index": { "number_of_replicas": "0", "refresh_interval": "10s" } },
-    "mappings": {
-      "_source": { "excludes": [], "includes": [], "enabled": true },
-      "_routing": { "required": false }, "dynamic": true, "numeric_detection": false,
-      "date_detection": true,
-      "dynamic_date_formats": ["strict_date_optional_time","yyyy/MM/dd HH:mm:ss Z||yyyy/MM/dd Z"],
-      "subobjects": true, "dynamic_templates": []
-    },
-    "lifecycle": { "enabled": true, "data_retention": "180d" }
-  },
-  "index_patterns": ["*.log"],
-  "data_stream": { "hidden": false, "allow_custom_routing": false }
-}
-' -X PUT "${LOG_ES_SERVER}/_index_template/uw-biz-log")
-    if [ "$http_code" -ge 200 ] && [ "$http_code" -lt 300 ]; then
-        log_ok "索引模板 uw-biz-log 创建成功 ($http_code)"
-    else
-        log_warn "索引模板 uw-biz-log 创建失败 (HTTP $http_code)"
-    fi
-
-    ELASTICSEARCH_SERVICE_ACCOUNT_TOKEN=$(docker exec es9200 /usr/share/elasticsearch/bin/elasticsearch-service-tokens create elastic/kibana my-token|awk -F ' = ' '{print $NF}'|sed 's/\r//g')
-    log_info "替换变量ELASTICSEARCH_SERVICE_ACCOUNT_TOKEN=${ELASTICSEARCH_SERVICE_ACCOUNT_TOKEN}"
-    find "/home/kibana5601/config" -type f -exec sed -i "s\x01#{ELASTICSEARCH_SERVICE_ACCOUNT_TOKEN}\x01${ELASTICSEARCH_SERVICE_ACCOUNT_TOKEN}\x01g" {} +
-
-    log_ok "ES 配置初始化完成"
-
-    log_step "启动 Kibana..."
-    run_log "启动 Kibana" bash "${SCRIPT_DIR}/startKibana5601.sh"
-    log_ok "Kibana 已启动"
 }
 
 # ============================================================
