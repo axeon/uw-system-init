@@ -286,10 +286,10 @@ RABBITMQ_SSL=false
 RABBITMQ_USERNAME=rabbit
 RABBITMQ_PASSWORD=$(generate_password)
 
-# MINIO相关配置
-MINIO_SERVER=http://${HOST_IP}:9000
-MINIO_ROOT_USERNAME=minio
-MINIO_ROOT_PASSWORD=$(generate_password)
+# RUSTFS相关配置
+RUSTFS_SERVER=http://${HOST_IP}:9000
+RUSTFS_ROOT_USERNAME=rustfs
+RUSTFS_ROOT_PASSWORD=$(generate_password)
 
 # GATEWAY相关配置
 GATEWAY_SERVER=http://${HOST_IP}
@@ -507,7 +507,7 @@ pull_selected_images() {
             2) images+=("${IMAGE_RABBITMQ}") ;;
             3) images+=("${IMAGE_ELASTICSEARCH}" "${IMAGE_KIBANA}") ;;
             4) images+=("${IMAGE_NACOS}") ;;
-            5) images+=("${IMAGE_MINIO}") ;;
+            5) images+=("${IMAGE_RUSTFS}") ;;
         esac
     done
 
@@ -602,7 +602,7 @@ setup_nacos() {
     log_info "等待 Nacos 就绪 (30s)..."
     sleep 30
 }
-setup_minio()    { _start_service "MinIO"    "startMinio9000.sh"; }
+setup_rustfs()   { _start_service "RustFS"   "startRustfs9000.sh"; }
 setup_gitea()    { _start_service "Gitea"    "startGitea.sh"; }
 setup_nexus3()   { _start_service "Nexus3"   "startNexus3.sh"; }
 
@@ -875,7 +875,7 @@ apply_config
 # --- 阶段 3: 选择安装组件 (whiptail 多选菜单) ---
 log_step "===== 阶段 3: 选择安装组件 ====="
 
-BASIC_ITEMS=("MySQL 数据库" "Redis 缓存服务" "RabbitMQ 队列服务" "ES+Kibana 日志服务" "Nacos 服务管理" "MinIO 存储服务")
+BASIC_ITEMS=("MySQL 数据库" "Redis 缓存服务" "RabbitMQ 队列服务" "ES+Kibana 日志服务" "Nacos 服务管理" "RustFS 存储服务")
 UW_ITEMS=("uw-gateway 网关服务" "uw-auth-center 鉴权中心" "uw-task-center 任务中心" "uw-ops-center 运维中心" "uw-gateway-center 网关中心" "uw-mydb-center 数据中心" "uw-ai-center AI中心" "uw-mydb-proxy 数据代理" "uw-tinyurl-center 短链中心" "uw-notify-center 通知中心")
 UI_ITEMS=("root-pc-ui 系统管理" "ops-pc-ui 运维管理" "admin-pc-ui 平台管理")
 SAAS_ITEMS=("saas-base 基础服务" "saas-finance 财务服务" "saas-pc-ui SaaS管理端")
@@ -942,7 +942,7 @@ for i in "${BASIC_SELECTED[@]}"; do
         2) _copy_init_home "rabbitmq5672" ;;
         3) _copy_init_home "es9200"; _copy_init_home "kibana5601" ;;
         4) _copy_init_home "nacos8848" ;;
-        5) _copy_init_home "minio9000" ;;
+        5) _copy_init_home "rustfs9000" ;;
     esac
 done
 
@@ -953,6 +953,12 @@ for i in "${DEV_SELECTED[@]}"; do
         0) _copy_init_home "gitea" ;;
     esac
 done
+
+# 数据组件 agent 节点模板（uw-mydb-es / uw-mydb-redis）：随安装无条件分发——数据节点与
+# 平台主机均可手动执行 startUwMydbEs.sh / startUwRedis.sh（模板缺失时脚本会自举基础配置）。
+# uw-task-mq 无配置文件模板，目录由 startUwTaskMq.sh 自建。
+_copy_init_home "uw-es9200"
+_copy_init_home "redis6379"
 
 SQL_NEEDED=false
 for i in "${BASIC_SELECTED[@]}"; do [ "$i" = "0" ] && SQL_NEEDED=true; done
@@ -999,7 +1005,7 @@ for i in "${BASIC_SELECTED[@]}"; do
         2) setup_rabbitmq ;;
         3) setup_es ;;
         4) setup_nacos ;;
-        5) setup_minio ;;
+        5) setup_rustfs ;;
     esac
 done
 

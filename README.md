@@ -15,7 +15,7 @@ UniWeb 微服务平台一键部署工具。通过交互式向导自动完成系�
 
 | 分类 | 组件 |
 |------|------|
-| **基础设施** | MySQL 8.4 · Redis 8 · RabbitMQ 4 · Elasticsearch 9 + Kibana · Nacos 2.3 · MinIO |
+| **基础设施** | MySQL 8.4 · Redis 8 · RabbitMQ 4 · Elasticsearch 9 + Kibana · Nacos 2.3 · RustFS |
 | **UniWeb 微服务** | Gateway · Auth Center · Task Center · Ops Center · Gateway Center · AI Center · MyDB Center · MyDB Proxy · TinyURL Center · Notify Center |
 | **UniWeb 前端** | Root PC UI · Ops PC UI · Admin PC UI |
 | **SaaS 服务** | SaaS Base · SaaS Finance · SaaS PC UI |
@@ -125,6 +125,11 @@ bash /root/uniweb/script/init/initDocker.sh
 
 # 重置 Registry 认证（修改 REGISTRY_PASSWORD 后重新生成 htpasswd 并 login）
 bash /root/uniweb/script/init/initRegistry.sh
+
+# 启动数据组件 agent 节点（注册到 center 领编排任务；端口自动协商避让已占用端口组）
+bash /root/uniweb/script/startUwMydbEs.sh    # Elasticsearch agent → uw-mydb-center
+bash /root/uniweb/script/startUwRedis.sh     # Redis agent → uw-mydb-center
+bash /root/uniweb/script/startUwTaskMq.sh    # RabbitMQ agent → uw-task-center
 ```
 
 所有脚本通过 `common.sh` 共享 Docker 运行参数（时区、host 网络、自动重启）。
