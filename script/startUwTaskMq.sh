@@ -9,7 +9,7 @@ create_dir /home/mq5672/data
 docker_remove uw-task-mq-5672
 
 CID=$(docker run -d \
--e "TASK_CENTER_HOST=${GATEWAY_SERVER}/uw-task-center" \
+-e "OPS_CENTER_HOST=${GATEWAY_SERVER}/uw-ops-center" \
 -e "RABBITMQ_DEFAULT_USER=${RABBITMQ_USERNAME}" \
 -e "RABBITMQ_DEFAULT_PASS=${RABBITMQ_PASSWORD}" \
 -v /home/mq5672/data:/var/lib/rabbitmq \

@@ -11,7 +11,7 @@ docker_remove uw-mydb-mysql-3308
 
 CID=$(docker run -d \
 -e "MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}" \
--e "MYDB_CENTER_HOST=${GATEWAY_SERVER}/uw-mydb-center" \
+-e "OPS_CENTER_HOST=${GATEWAY_SERVER}/uw-ops-center" \
 -v /home/mysql3308/conf:/etc/mysql/conf.d \
 -v /home/mysql3308/logs:/logs \
 -v /home/mysql3308/data:/var/lib/mysql \

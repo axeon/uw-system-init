@@ -53,7 +53,7 @@ chown -R 999:999 /home/redis6379/conf
 docker_remove uw-mydb-redis-6379
 
 CID=$(docker run -d \
--e "MYDB_CENTER_HOST=${GATEWAY_SERVER}/uw-mydb-center" \
+-e "OPS_CENTER_HOST=${GATEWAY_SERVER}/uw-ops-center" \
 -v /home/redis6379/conf:/usr/local/etc/redis \
 -v /home/redis6379/data:/data \
 ${DOCKER_COMMON_OPTS} \

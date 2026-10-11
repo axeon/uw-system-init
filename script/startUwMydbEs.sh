@@ -41,7 +41,7 @@ CID=$(docker run -d \
 --ulimit nproc=32768:32768 \
 --ulimit memlock=-1:-1 \
 -e "ES_JAVA_OPTS=-Xms1g -Xmx1g" \
--e "MYDB_CENTER_HOST=${GATEWAY_SERVER}/uw-mydb-center" \
+-e "OPS_CENTER_HOST=${GATEWAY_SERVER}/uw-ops-center" \
 -v /home/uw-es9200/config:/usr/share/elasticsearch/config \
 -v /home/uw-es9200/data:/usr/share/elasticsearch/data \
 -v /home/uw-es9200/logs:/usr/share/elasticsearch/logs \
