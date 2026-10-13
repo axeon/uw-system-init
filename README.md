@@ -127,8 +127,8 @@ bash /root/uniweb/script/init/initDocker.sh
 bash /root/uniweb/script/init/initRegistry.sh
 
 # 启动数据组件 agent 节点（注册到 center 领编排任务；端口自动协商避让已占用端口组）
-bash /root/uniweb/script/startUwMydbEs.sh    # Elasticsearch agent → uw-mydb-center
-bash /root/uniweb/script/startUwRedis.sh     # Redis agent → uw-mydb-center
+bash /root/uniweb/script/startUwOpsEs.sh    # Elasticsearch agent → uw-mydb-center
+bash /root/uniweb/script/startUwOpsRedis.sh     # Redis agent → uw-mydb-center
 bash /root/uniweb/script/startUwTaskMq.sh    # RabbitMQ agent → uw-task-center
 ```
 

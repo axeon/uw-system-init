@@ -954,9 +954,9 @@ for i in "${DEV_SELECTED[@]}"; do
     esac
 done
 
-# 数据组件 agent 节点模板（uw-mydb-es / uw-mydb-redis）：随安装无条件分发——数据节点与
-# 平台主机均可手动执行 startUwMydbEs.sh / startUwRedis.sh（模板缺失时脚本会自举基础配置）。
-# uw-task-mq 无配置文件模板，目录由 startUwTaskMq.sh 自建。
+# 数据组件 agent 节点模板（uw-ops-es / uw-ops-redis）：随安装无条件分发——数据节点与
+# 平台主机均可手动执行 startUwOpsEs.sh / startUwOpsRedis.sh（模板缺失时脚本会自举基础配置）。
+# uw-ops-rabbit 无配置文件模板，目录由 startUwOpsRabbit.sh 自建。
 _copy_init_home "uw-es9200"
 _copy_init_home "redis6379"
 

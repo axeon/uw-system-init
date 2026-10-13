@@ -1,5 +1,5 @@
 #!/bin/bash
-# startUwRedis.sh — 启动 uw-mydb-redis agent 节点 (Redis + 注册到 mydb-center)
+# startUwOpsRedis.sh — 启动 uw-ops-redis agent 节点 (Redis + 注册到 mydb-center)
 # 端口由 entrypoint 自动协商（默认 6379/16379 cluster-bus，被占则 +1 递增，粘性落 data/agent/port）。
 source "$(dirname "$0")/common.sh"
 
@@ -50,14 +50,14 @@ fi
 # 由 redis-server 进程回写 conf，root 属主会写失败（凭据不持久化）
 chown -R 999:999 /home/redis6379/conf
 
-docker_remove uw-mydb-redis-6379
+docker_remove uw-ops-redis-6379
 
 CID=$(docker run -d \
 -e "OPS_CENTER_HOST=${GATEWAY_SERVER}/uw-ops-center" \
 -v /home/redis6379/conf:/usr/local/etc/redis \
 -v /home/redis6379/data:/data \
 ${DOCKER_COMMON_OPTS} \
---name=uw-mydb-redis-6379 \
+--name=uw-ops-redis-6379 \
 "${REGISTRY_SERVER}/${IMAGE_REDIS_UW}")
 
-docker_run_check "$CID" "uw-mydb-redis-6379"
+docker_run_check "$CID" "uw-ops-redis-6379"
