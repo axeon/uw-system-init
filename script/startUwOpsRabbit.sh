@@ -4,7 +4,7 @@
 # 粘性落 /var/lib/rabbitmq/agent/port）；erlang cookie 由 center 组队任务统一下发。
 source "$(dirname "$0")/common.sh"
 
-create_dir /home/rabbit5672/data
+create_dir /home/uw-ops-rabbit-5672/data
 
 docker_remove uw-ops-rabbit-5672
 
@@ -12,7 +12,7 @@ CID=$(docker run -d \
 -e "OPS_CENTER_HOST=${GATEWAY_SERVER}/uw-ops-center" \
 -e "RABBITMQ_DEFAULT_USER=${RABBITMQ_USERNAME}" \
 -e "RABBITMQ_DEFAULT_PASS=${RABBITMQ_PASSWORD}" \
--v /home/rabbit5672/data:/var/lib/rabbitmq \
+-v /home/uw-ops-rabbit-5672/data:/var/lib/rabbitmq \
 ${DOCKER_COMMON_OPTS} \
 --name=uw-ops-rabbit-5672 \
 "${REGISTRY_SERVER}/${IMAGE_MQ_UW}")

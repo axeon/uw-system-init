@@ -1,7 +1,0 @@
-# uw-ops-es agent 节点基础配置（演示/联调形态）
-# - 安全默认关闭：免证书栈，http 明文注册；凭据后续经 mydb-center 集群行/改密链路开启
-# - 勿预置 cluster.initial_master_nodes / node.name / discovery.*：
-#   单机初始化写入 discovery.type=single-node 与 initial_master_nodes 冲突（ES 启动直接报错），
-#   组队/join 的 discovery 段由 center 追加标记块（# >>> uw-es-orchestration >>>）注入
-network.host: 0.0.0.0
-xpack.security.enabled: false
