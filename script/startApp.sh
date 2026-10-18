@@ -24,6 +24,8 @@ docker_remove "$CONTAINER_NAME"
 DOCKER_MEM_OPTS="-m ${APP_MEM_LIMIT}"
 
 
+# 时区跟随宿主：DOCKER_COMMON_OPTS 已注入宿主 /etc/timezone 的 TZ 并挂载 localtime/timezone——
+# 容器与同宿主 DB 的 NOW() 时区语义天然一致，勿在此硬编码时区。
 CID=$(docker run -d \
 ${DOCKER_MEM_OPTS} \
 -e "JAVA_OPTS=-XX:+UseShenandoahGC -XX:+UseContainerSupport -XX:MaxRAMPercentage=80.0" \

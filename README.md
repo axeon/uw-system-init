@@ -126,13 +126,67 @@ bash /root/uniweb/script/init/initDocker.sh
 # 重置 Registry 认证（修改 REGISTRY_PASSWORD 后重新生成 htpasswd 并 login）
 bash /root/uniweb/script/init/initRegistry.sh
 
-# 启动数据组件 agent 节点（注册到 center 领编排任务；端口自动协商避让已占用端口组）
-bash /root/uniweb/script/startUwOpsEs.sh    # Elasticsearch agent → uw-mydb-center
-bash /root/uniweb/script/startUwOpsRedis.sh     # Redis agent → uw-mydb-center
-bash /root/uniweb/script/startUwTaskMq.sh    # RabbitMQ agent → uw-task-center
+# 启动数据组件 agent 节点（注册到 uw-ops-center 领编排任务；规划端口默认 9200/6379/5672，
+# 被占时 entrypoint 以规划端口为基数自动协商避让，容器名/hostname 同按规划端口生成）
+bash /root/uniweb/script/startUwOpsEs.sh            # Elasticsearch agent（UW_ES_PORT=9200）
+bash /root/uniweb/script/startUwOpsRedis.sh         # Redis agent（UW_REDIS_PORT=6379）
+bash /root/uniweb/script/startUwOpsRabbit.sh        # RabbitMQ agent（UW_RABBIT_PORT=5672）
+# 多实例同机：规划端口参数化起第二个节点（数据目录/容器名随之区分）
+UW_ES_PORT=9201 bash /root/uniweb/script/startUwOpsEs.sh
 ```
 
 所有脚本通过 `common.sh` 共享 Docker 运行参数（时区、host 网络、自动重启）。
+
+## 容器命名与实例身份规范
+
+全平台容器实例命名与身份的单一规范（2026-10-14 定案，四域中间件 / DeployPlan 应用容器 / 演练容器一律适用）。
+
+### 容器命名模板（两形态）
+
+```
+容器名 = {镜像短名}-{实例键}
+实例键：
+  ① 有端口镜像 → 主端口
+     主端口 = deploy_ports 以保留键 primary 显式声明的端口名（如 primary=amqp）；
+     未声明时回退端口名字典序首名（与 allocatePorts 分配顺序同源，确定性）
+  ② 无端口镜像（worker/任务型）→ 实例序号 {ordinal}（同主机同镜像既有容器数+1，查台账）
+镜像短名 = image ref 最后一段（去 registry 前缀）
+兜底     = 端口分配/序号查询失败 → uw-ops-{containerId}
+```
+
+- `--name` 与 `--hostname` 同源注入（start 脚本同一变量）：容器内 `uname -n` 即容器名，
+  域 agent 随注册上报（server 行 `report_container_name` 列），center 凭 `(host, containerName)`
+  与容器台账（`ops_container_info`）关联——同主机同名容器由 docker 保证唯一。
+- **禁令**：hostname 即容器名后，任何代码不得再假设 `uname -n` 是短容器 ID。
+- 演练/临时容器一律按模板起名（`uw-ops-{域}-{端口}`），不得使用 drill-xxx 等随意名。
+
+### 实例身份 = ip + port
+
+分布式节点身份不得依赖默认 hostname（容器短 ID，重建即漂移）。身份名必须包含 ip 与 port
+两个成分，分隔符依协议域约定（全局一致的是成分规则，不是字面格式）：
+
+| 域 | 身份形态 | 分隔约定 |
+|---|---|---|
+| RabbitMQ | `rabbit-{port}@{ip}`（erlang 节点名） | `@`（erlang 格式约束） |
+| Elasticsearch | `{ip}:{port}`（entrypoint `-Enode.name` 注入） | `:` |
+| MySQL MGR | `report_host={ip}` + `report_port={port}` | 协议原生双字段 |
+| Redis | 无节点名，server 行 `(host, port)` 二元组 | 双列 |
+
+### 两条容器生命周期链（端口语义差异）
+
+| | 链 A：DeployPlan 应用容器 | 链 B：中间件四域 |
+|---|---|---|
+| 容器由谁起 | center 下 plan → host agent `docker run` | start 脚本（本仓库）手动起 |
+| 端口 | `allocatePorts` 预分配（台账无锁汇总冲突递增） | entrypoint 运行时协商（规划端口被占则整组 +1 平移，粘性落卷） |
+| 规划端口 | plan 的 deploy_ports | 脚本参数 `UW_*_PORT`（env 注入容器，兼作协商基数） |
+| 台账登记 | plan 预建行（agent 回填 hash/observed） | host agent 全量 docker ps 落 `ops_container_info`（plan_id=-1 行） |
+| 失真告警 | 预分配被外部侵占（预留） | agent 上报 plannedPort≠实际端口 → center 发 WARN 告警（`mwagent.port.drift.{域}`） |
+
+链 B 落台账行经域 server 行随注册上报的容器名关联升级：回填 `cluster_id` 与 cluster 行设定的
+`deploy_profile`（容器名从"约定"变"登记"）；关联不上的野容器 `deploy_profile` 为空、
+`cluster_id=-1`，连续两窗口缺席置 STOP_SUCCESS（行保留审计，不物理删）。
+
+长期终态：中间件容器逐步走链 A 通道（deployRef 八列已备），start 脚本保留为 bootstrap/救援通道。
 
 ## 镜像搬运
 

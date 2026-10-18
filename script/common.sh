@@ -60,7 +60,11 @@ docker_run_check() {
     fi
 }
 
-# Docker 通用启动参数: 时区 + host 网络 + 自动重启
-TZ_NAME=$(cat /etc/timezone 2>/dev/null || echo "UTC")
+# Docker 通用启动参数: 时区(跟随宿主) + host 网络 + 自动重启
+# 时区推导：/etc/timezone 优先，缺文件时从 /etc/localtime 链接推导（Debian 系外发行版常无前者）；
+# 均不可得才 UTC 兜底。宿主文件缺失时按推导值补建（防单文件 bind 挂载被 docker 目录化）。
+TZ_NAME=$(cat /etc/timezone 2>/dev/null)
+[ -z "${TZ_NAME}" ] && TZ_NAME=$(readlink /etc/localtime 2>/dev/null | sed 's|.*/zoneinfo/||')
+[ -z "${TZ_NAME}" ] && TZ_NAME="UTC"
 [ ! -f /etc/timezone ] && echo "$TZ_NAME" > /etc/timezone
 DOCKER_COMMON_OPTS="-e TZ=${TZ_NAME} -v /etc/localtime:/etc/localtime:ro -v /etc/timezone:/etc/timezone:ro --network=host --restart=unless-stopped"
