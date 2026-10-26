@@ -2,11 +2,11 @@
 set -e
 
 RUNNER_VERSION=""
-RUNNER_BASE_URL="https://dl.gitea.com/act_runner"
+RUNNER_BASE_URL="https://dl.gitea.com/gitea-runner"
 RUNNER_DIR="/home/gitea/runner"
 BIN_DIR="${RUNNER_DIR}/bin"
 CONFIG_DIR="${RUNNER_DIR}/config"
-RUNNER_BIN="${BIN_DIR}/act_runner"
+RUNNER_BIN="${BIN_DIR}/gitea-runner"
 RUNNER_USER="gitea-runner"
 
 log_info() {
@@ -61,15 +61,15 @@ download_runner() {
 
     os="$(detect_os)"
     arch="$(detect_arch)"
-    filename="act_runner-${RUNNER_VERSION}-${os}-${arch}"
+    filename="gitea-runner-${RUNNER_VERSION}-${os}-${arch}"
     url="${RUNNER_BASE_URL}/${RUNNER_VERSION}/${filename}"
 
     if [ -f "${RUNNER_BIN}" ]; then
-        log_info "act_runner 已存在，跳过下载: ${RUNNER_BIN}"
+        log_info "gitea-runner 已存在，跳过下载: ${RUNNER_BIN}"
         return 0
     fi
 
-    log_info "正在下载 act_runner ${RUNNER_VERSION} (${os}-${arch})..."
+    log_info "正在下载 gitea-runner ${RUNNER_VERSION} (${os}-${arch})..."
     log_info "下载地址: ${url}"
 
     if command -v curl > /dev/null 2>&1; then
@@ -88,7 +88,7 @@ download_runner() {
 
     chmod 755 "${RUNNER_BIN}"
     chmod 755 ${RUNNER_DIR}/deploy/*.sh
-    log_info "act_runner 下载完成并已赋予执行权限"
+    log_info "gitea-runner 下载完成并已赋予执行权限"
 }
 
 create_user() {
@@ -119,11 +119,11 @@ setup_systemd() {
     cat > /etc/systemd/system/gitea-runner.service << 'EOF'
 [Unit]
 Description=Gitea Actions runner
-Documentation=https://gitea.com/gitea/act_runner
+Documentation=https://gitea.com/gitea/gitea-runner
 After=docker.service
 
 [Service]
-ExecStart=/bin/bash -lc 'source /etc/profile || true;/home/gitea/runner/bin/act_runner daemon --config /home/gitea/runner/config/config.yaml'
+ExecStart=/bin/bash -lc 'source /etc/profile || true;/home/gitea/runner/bin/gitea-runner daemon --config /home/gitea/runner/config/config.yaml'
 ExecReload=/bin/kill -s HUP $MAINPID
 WorkingDirectory=/home/gitea/runner
 TimeoutSec=0
@@ -186,7 +186,7 @@ main() {
     log_info "步骤 2/8: 创建目录结构"
     create_dirs
 
-    log_info "步骤 3/8: 下载 act_runner"
+    log_info "步骤 3/8: 下载 gitea-runner"
     download_runner
 
     log_info "步骤 4/8: 创建用户"

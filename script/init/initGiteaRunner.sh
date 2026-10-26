@@ -11,11 +11,11 @@ chown -R gitea-runner:gitea-runner /home/gitea/runner
 cat > /etc/systemd/system/gitea-runner.service << 'EOF'
 [Unit]
 Description=Gitea Actions runner
-Documentation=https://gitea.com/gitea/act_runner
+Documentation=https://gitea.com/gitea/gitea-runner
 After=docker.service
 
 [Service]
-ExecStart=/bin/bash -lc 'source /etc/profile || true;/home/gitea/runner/bin/act_runner daemon --config /home/gitea/runner/config/config.yaml'
+ExecStart=/bin/bash -lc 'source /etc/profile || true;/home/gitea/runner/bin/gitea-runner daemon --config /home/gitea/runner/config/config.yaml'
 ExecReload=/bin/kill -s HUP $MAINPID
 WorkingDirectory=/home/gitea/runner
 TimeoutSec=0

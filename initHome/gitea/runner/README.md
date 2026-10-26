@@ -4,7 +4,7 @@
 
 执行初始化脚本，自动完成以下操作：
 
-- 从 `dl.gitea.com` 获取最新版本并下载匹配平台的 `act_runner`
+- 从 `dl.gitea.com` 获取最新版本并下载匹配平台的 `gitea-runner`
 - 创建 `gitea-runner` 用户（shell: `/bin/bash`），加入 `docker` 组
 - 注册 Runner 并配置 systemd 服务
 
