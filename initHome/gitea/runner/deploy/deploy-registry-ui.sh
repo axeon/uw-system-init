@@ -1,5 +1,5 @@
 #!/bin/bash
-APP_HOST=$(ip addr show | awk '/inet / && /10\.|192\.168\./ {print $2}' | cut -d/ -f1)
+APP_HOST=$(ip addr show | awk '/inet / && /10\.|192\.168\./ {print $2; exit}' | cut -d/ -f1)
 APP_NAME=$1
 APP_VERSION=$2
 APP_PORT=$3
