@@ -10,7 +10,7 @@
 #   - 从 SQL 文件内容自动提取库名 (CREATE DATABASE / USE 语句)
 #   - 库已存在且无 DROP 语句时，自动跳过
 #   - 库已存在且 SQL 含 DROP 语句时，询问客户是否执行 (默认 N)
-# 前置: MySQL 容器 (uw-mydb-mysql-3308) 已启动
+# 前置: MySQL 容器 (mysql-3308) 已启动
 
 # ============================================================
 #  配置加载
@@ -24,7 +24,7 @@ INIT_DATA_DIR="${SCRIPT_DIR}/../../initData"
 
 MYSQL_HOST="${MYSQL_HOST:-127.0.0.1}"
 MYSQL_PORT="${MYSQL_PORT:-3308}"
-MYSQL_CONTAINER="uw-mydb-mysql-3308"
+MYSQL_CONTAINER="mysql-3308"
 
 # ============================================================
 #  底层工具: MySQL 执行 / 路径解析
